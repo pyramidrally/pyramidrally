@@ -1,0 +1,14 @@
+{
+  "name": "pyramid-rush",
+  "version": "1.0.0",
+  "description": "Daily food-pyramid racing: dodge the junk, grab the greens, race the world live.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
+  }
+}
