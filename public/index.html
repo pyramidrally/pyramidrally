@@ -57,9 +57,6 @@
   .hudbox{background:rgba(255,255,255,.88);border:2px solid #c8d8b8;border-radius:12px;padding:7px 11px;
     font-family:'Press Start 2P',monospace;font-size:8px;color:#7a8a6e}
   .hudbox .big{font-size:14px;margin-top:4px;color:var(--dgreen)}
-  #sizeMeter{display:flex;gap:3px;margin-top:5px}
-  #sizeMeter i{width:10px;height:10px;border-radius:50%;background:#e2ecd6;display:block}
-  #sizeMeter i.on{background:var(--orange)}
   #minimap{position:fixed;right:10px;top:64px;width:132px;height:132px;background:rgba(255,255,255,.88);
     border:2px solid #c8d8b8;border-radius:12px;z-index:5;pointer-events:none}
   #rollHint{position:fixed;top:18%;left:50%;transform:translateX(-50%);z-index:6;pointer-events:none;
@@ -170,7 +167,6 @@
 <canvas id="minimap" width="264" height="264" class="hidden"></canvas>
 <div id="hud" class="hidden">
   <div class="hudbox">TIME<div class="big" id="timeLabel">--.--</div></div>
-  <div class="hudbox">SIZE<div id="sizeMeter"><i></i><i></i><i></i><i></i></div></div>
   <div class="hudbox">SPEED<div class="big" id="speedLabel">0</div></div>
 </div>
 <div id="hudButtons">
@@ -1484,10 +1480,6 @@
       foodToast(`${emoji} ${name} — ${fact}`, true);
       burst(f.x, f.y, '#ff8c2e', 12);
     }
-    updateSizeMeter();
-  }
-  function updateSizeMeter(){
-    [...$('sizeMeter').children].forEach((el, i) => el.classList.toggle('on', i < me.size));
   }
   let toastTimer = null;
   function foodToast(msg, junk){
