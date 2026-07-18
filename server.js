@@ -14,32 +14,61 @@ const QRCode = require('qrcode');
 const PORT = process.env.PORT || 3000;
 const LB_FILE = path.join(__dirname, 'leaderboard.json');
 
-// ---------- optional free persistent storage (Upstash Redis REST) ----------
-// Render's free tier wipes local disk on every sleep/restart. Set these two
-// env vars (free Upstash database) to survive that; without them the game
-// still works, just using the local file as before.
+// ---------- persistent leaderboard storage ----------
+// The board is just a small JSON file — the problem is that Render's free
+// tier wipes the local disk on every sleep/redeploy. So we optionally mirror
+// that file somewhere that survives. Three backends, picked automatically:
+//   1. GitHub Gist  — set GIST_ID + GIST_TOKEN   (simplest: it IS a txt file,
+//                     living in a gist you own; token needs only "gist" scope)
+//   2. Upstash Redis — set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN
+//   3. Local file only (default) — resets whenever the free instance restarts
 const KV_URL = process.env.UPSTASH_REDIS_REST_URL;
 const KV_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
-const kvEnabled = !!(KV_URL && KV_TOKEN);
-async function kvGet(key) {
-  if (!kvEnabled) return null;
+const GIST_ID = process.env.GIST_ID;
+const GIST_TOKEN = process.env.GIST_TOKEN;
+const storageMode = (GIST_ID && GIST_TOKEN) ? 'gist'
+                  : (KV_URL && KV_TOKEN) ? 'upstash' : 'file';
+
+async function loadRemote() {
   try {
-    const r = await fetch(`${KV_URL}/get/${encodeURIComponent(key)}`, {
-      headers: { Authorization: `Bearer ${KV_TOKEN}` },
-    });
-    const j = await r.json();
-    return j && j.result ? JSON.parse(j.result) : null;
-  } catch { return null; }
-}
-async function kvSet(key, val) {
-  if (!kvEnabled) return;
-  try {
-    await fetch(`${KV_URL}/set/${encodeURIComponent(key)}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${KV_TOKEN}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(JSON.stringify(val)),
-    });
+    if (storageMode === 'upstash') {
+      const r = await fetch(`${KV_URL}/get/pr-boards`, {
+        headers: { Authorization: `Bearer ${KV_TOKEN}` } });
+      const j = await r.json();
+      return j && j.result ? JSON.parse(j.result) : null;
+    }
+    if (storageMode === 'gist') {
+      const r = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+        headers: { Authorization: `Bearer ${GIST_TOKEN}`, 'User-Agent': 'pyramid-rally' } });
+      const j = await r.json();
+      const f = j.files && j.files['leaderboard.json'];
+      if (!f) return null;
+      const txt = f.truncated ? await (await fetch(f.raw_url)).text() : f.content;
+      return JSON.parse(txt);
+    }
   } catch {}
+  return null;
+}
+let saveRemoteBusy = false, saveRemoteAgain = false;
+async function saveRemote() {
+  if (storageMode === 'file') return;
+  if (saveRemoteBusy) { saveRemoteAgain = true; return; } // never overlap writes
+  saveRemoteBusy = true;
+  try {
+    const body = JSON.stringify(boards);
+    if (storageMode === 'upstash') {
+      await fetch(`${KV_URL}/set/pr-boards`, { method: 'POST',
+        headers: { Authorization: `Bearer ${KV_TOKEN}` },
+        body: JSON.stringify(body) });
+    } else {
+      await fetch(`https://api.github.com/gists/${GIST_ID}`, { method: 'PATCH',
+        headers: { Authorization: `Bearer ${GIST_TOKEN}`, 'User-Agent': 'pyramid-rally',
+          'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: { 'leaderboard.json': { content: body } } }) });
+    }
+  } catch {}
+  saveRemoteBusy = false;
+  if (saveRemoteAgain) { saveRemoteAgain = false; saveRemote(); }
 }
 
 const app = express();
@@ -61,12 +90,10 @@ app.get('/api/history', async (req, res) => {
   const days = [];
   for (let d = 1; d <= 5; d++) {
     const ds = new Date(Date.now() - d * 86400000).toISOString().slice(0, 10);
-    let e = boards[ds];
-    if (!e && kvEnabled) { e = await kvGet('pr-lb-' + ds); if (e) boards[ds] = e; }
-    e = e || [];
+    const e = boards[ds] || [];
     days.push({ date: ds, top: e.slice(0, 3).map(x => ({ n: x.n, t: x.t })), total: e.length });
   }
-  res.json({ days, storage: kvEnabled ? 'upstash' : 'file' });
+  res.json({ days, storage: storageMode });
 });
 
 const server = http.createServer(app);
@@ -84,7 +111,7 @@ function saveBoards() {
     for (const k of keys) slim[k] = boards[k];
     boards = slim;
     fs.writeFile(LB_FILE, JSON.stringify(boards), () => {});
-    kvSet('pr-lb-' + today(), boards[today()] || []); // survives disk wipes
+    saveRemote(); // mirror the file somewhere that survives disk wipes
   }, 500);
 }
 function today() { return new Date().toISOString().slice(0, 10); }
@@ -98,11 +125,14 @@ function worldGhost() {
   return b.length && b[0].p ? { n: b[0].n, t: b[0].t, p: b[0].p } : null;
 }
 
-// on boot, if Upstash is configured, pull today's board in case local disk was wiped
+// on boot, restore from remote storage in case the local disk was wiped
 (async () => {
-  if (!kvEnabled) return;
-  const remote = await kvGet('pr-lb-' + today());
-  if (remote && (!boards[today()] || !boards[today()].length)) boards[today()] = remote;
+  const remote = await loadRemote();
+  if (!remote) return;
+  for (const day of Object.keys(remote)) {
+    if (!boards[day] || boards[day].length < remote[day].length) boards[day] = remote[day];
+  }
+  console.log('  Restored leaderboards from ' + storageMode + ' (' + Object.keys(remote).length + ' day(s))');
 })();
 
 // ---------- clients & live positions ----------
@@ -182,7 +212,7 @@ wss.on('connection', (ws) => {
         t: 'welcome', id: myId, date: today(),
         lb: publicBoard(), ghost: worldGhost(),
         racing: liveCount(), crew: c.crewCode,
-        storage: kvEnabled ? 'upstash' : 'file',
+        storage: storageMode,
       });
       broadcast({ t: 'roster', id: myId, n: c.name, face: c.face }, myId);
       for (const [id, o] of clients) if (id !== myId) send(ws, { t: 'roster', id, n: o.name, face: o.face });
@@ -307,6 +337,6 @@ server.listen(PORT, () => {
   console.log('');
   console.log('  🍏 PYRAMID RALLY server running!');
   console.log(`  Play at:  http://localhost:${PORT}`);
-  console.log(`  Leaderboard storage: ${kvEnabled ? 'Upstash Redis (persistent)' : 'local file (resets on redeploy — see README)'}`);
+  console.log(`  Leaderboard storage: ${storageMode === 'file' ? 'local file (resets on redeploy — see README)' : storageMode + ' (persistent)'}`);
   console.log('');
 });

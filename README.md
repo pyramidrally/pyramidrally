@@ -28,17 +28,31 @@ npm start          # → http://localhost:3000
 - Runtime **Node** · Build `npm install` · Start `npm start`
 - Free tier sleeps after ~15 min idle; first visitor waits ~30–50 s
 
-### Keep the leaderboard through restarts (free)
-Render's free disk is wiped on every sleep/redeploy. To persist the boards:
-1. Create a free Redis database at **upstash.com** (no card needed)
-2. In the database page, copy the **REST URL** and **REST TOKEN**
-3. In Render → your service → **Environment**, add:
-   - `UPSTASH_REDIS_REST_URL` = the REST URL
-   - `UPSTASH_REDIS_REST_TOKEN` = the REST token
-4. Redeploy. Boot log should say `Leaderboard storage: Upstash Redis (persistent)`
+### Keep the leaderboard through restarts
+The board is just a small JSON file — but Render's free tier wipes the local
+disk on every sleep/redeploy. Pick ONE of these to make it survive:
 
-Without these vars the game still works — boards just reset when the free
-instance restarts.
+**Option A — GitHub Gist (simplest: it's literally your txt file in the cloud)**
+1. Go to **gist.github.com** → paste `{}` → filename `leaderboard.json` → *Create secret gist*
+2. Copy the gist's ID from its URL (`gist.github.com/you/`**`THIS_LONG_ID`**)
+3. Go to github.com → Settings → Developer settings → **Tokens (classic)** →
+   Generate new token → tick ONLY the **gist** scope → generate & copy
+4. In Render → your service → **Environment**, add:
+   - `GIST_ID` = the gist ID
+   - `GIST_TOKEN` = the token
+5. Save (auto-redeploys). Boot log: `Leaderboard storage: gist (persistent)`
+   Bonus: you can watch your leaderboard live at the gist page.
+
+**Option B — Upstash Redis (free, more "proper")**
+1. **upstash.com** → sign up → Create Database (Redis, free plan)
+2. Copy the REST URL + REST TOKEN from the database page
+3. Render env vars: `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`
+
+**Option C — Render persistent disk** — zero setup, zero code, but needs a
+paid instance (attach a 1 GB disk; the existing `leaderboard.json` just works).
+
+Without any of these the game still works — boards simply reset whenever the
+free instance restarts.
 
 ## Files
 - `server.js` — Express + WebSocket: live positions, global daily leaderboard, start-queue marshal, crew codes, QR endpoint
