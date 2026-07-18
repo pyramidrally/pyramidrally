@@ -123,9 +123,23 @@ function saveBoards() {
 }
 
 // ---------- monthly championship ----------
-// Points by OVERALL finishing position on each daily stage: 1st = 100 pts,
-// 2nd = 99 … 100th = 1. Only signed-in drivers bank them; anonymous racers
-// still occupy their position (and so consume that position's points).
+// Points by OVERALL finishing position on each daily stage. The curve is
+// deliberately steep at the sharp end — a flat 100..1 ladder made winning
+// worth barely more than second, and on a quiet day everyone went home with
+// ~100. A hand-set top ten (rally/F1 shaped) decays geometrically to a single
+// point at 100th, so a win is worth roughly four top-ten finishes.
+// Only signed-in drivers bank points; anonymous racers still occupy their
+// position, and so consume that position's points.
+const POINTS = (() => {
+  const head = [100, 80, 65, 55, 47, 40, 34, 29, 25, 22];
+  const table = [];
+  for (let r = 1; r <= 100; r++) {
+    table.push(r <= head.length
+      ? head[r - 1]
+      : Math.max(1, Math.round(22 * Math.pow(1 / 22, (r - 10) / 90))));
+  }
+  return table;
+})();
 function monthsInBoards() {
   const s = new Set();
   for (const d of Object.keys(store.boards)) s.add(d.slice(0, 7));
@@ -143,7 +157,7 @@ function computeMonth(ym) {
       const e = entries[i];
       if (!e || !e.u) continue; // anonymous: position burned, no points
       const rec = totals.get(e.u) || { pts: 0, days: 0, best: 999, wins: 0 };
-      rec.pts += 100 - i;
+      rec.pts += POINTS[i];
       rec.days++;
       rec.best = Math.min(rec.best, i + 1);
       if (i === 0) rec.wins++;
@@ -169,7 +183,7 @@ function availableMonths() {
   return [...s].sort().reverse();
 }
 // what a given position on today's board is worth
-function pointsForRank(rank) { return rank >= 1 && rank <= 100 ? 101 - rank : 0; }
+function pointsForRank(rank) { return rank >= 1 && rank <= POINTS.length ? POINTS[rank - 1] : 0; }
 
 function publicBoard() {
   return board().slice(0, 100).map(e => ({
@@ -206,7 +220,7 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.ht
 app.get('/codriver', (req, res) => res.sendFile(path.join(__dirname, 'public', 'codriver.html')));
 
 app.get('/api/config', (req, res) => {
-  res.json({ google: GOOGLE_CLIENT_ID || null, storage: storageMode });
+  res.json({ google: GOOGLE_CLIENT_ID || null, storage: storageMode, points: POINTS });
 });
 
 // exchange a Google ID token for one of our sessions
@@ -479,4 +493,4 @@ server.listen(PORT, () => {
   console.log('');
 });
 
-module.exports = { computeMonth, pointsForRank, store, adoptStore };
+module.exports = { computeMonth, pointsForRank, store, adoptStore, POINTS };

@@ -29,10 +29,17 @@ npm start          # → http://localhost:3000
 - Free tier sleeps after ~15 min idle; first visitor waits ~30–50 s
 
 ### Accounts & the monthly championship (optional)
-Signed-in drivers bank championship points from every daily stage: **1st = 100
-points, 2nd = 99 … 100th = 1**. Anonymous racers still appear on the daily
-board and still occupy their finishing position (so they consume that
-position's points) — they just don't bank anything. Standings are recomputed
+Signed-in drivers bank championship points from every daily stage. The curve is
+steep at the sharp end so winning actually means something:
+
+| P1 | P2 | P3 | P4 | P5 | P10 | P25 | P50 | P100 |
+|----|----|----|----|----|-----|-----|-----|------|
+| 100| 80 | 65 | 55 | 47 | 22  | 13  | 6   | 1    |
+
+A win is worth roughly four top-ten finishes, and two mid-pack days never
+outweigh one victory. Anonymous racers still appear on the daily board and
+still occupy their finishing position (so they consume that position's
+points) — they just don't bank anything. Standings are recomputed
 from the stored daily boards, so a correction to any day fixes the month.
 
 To switch accounts on:

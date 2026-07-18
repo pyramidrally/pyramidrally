@@ -173,6 +173,9 @@
   table.mt td.d{text-align:right;color:#a5b199;font-size:11px;white-space:nowrap}
   table.mt tr.me td{background:var(--soft)}
   .acct{color:var(--green);font-weight:800;margin-left:3px}
+  .ladder{display:block;margin:6px 0 8px;padding:7px 9px;background:#fbfdf7;border:1px solid #e2ecd6;
+    border-radius:9px;font-size:11.5px;line-height:1.7;color:#5a6a4e}
+  .ladder b{color:var(--dgreen)}
   #authBox .fineprint{text-align:left}
   #gBtn{display:flex;justify-content:center;min-height:42px}
 </style>
@@ -282,7 +285,9 @@
     <summary>monthly championship</summary>
     <div class="body">
       • <b>Sign in</b> (top of the menu) and every daily stage starts scoring. Anonymous runs still make the daily board — they just don't bank points.<br>
-      • Points come from your <b>finishing position on the day</b>: 1st = 100, 2nd = 99, and so on down to 100th = 1. Below 100th, no points.<br>
+      • Points come from your <b>finishing position on the day</b>, and the sharp end is worth far more:<br>
+      <span id="ptsLadder" class="ladder">…</span>
+      Below 100th, no points — but a win is worth about four top-ten finishes.<br>
       • Only your <b>fastest run</b> each day counts, so restart as often as you like.<br>
       • Everyone on the board takes up a position — including anonymous drivers — so a position they hold is one nobody banks.<br>
       • Positions keep moving while the day is open, so <b>points settle when the stage closes</b> at midnight UTC.<br>
@@ -1193,9 +1198,19 @@
     } catch (e){ toast('Sign-in failed: ' + e.message); }
   }
 
+  function renderLadder(points){
+    const el = $('ptsLadder');
+    if (!el || !points || !points.length) return;
+    const rungs = [1, 2, 3, 5, 10, 25, 50, 100];
+    const ord = r => r + (r === 1 ? 'st' : r === 2 ? 'nd' : r === 3 ? 'rd' : 'th');
+    el.innerHTML = rungs.filter(r => points[r - 1] !== undefined)
+      .map(r => ord(r) + ' <b>' + points[r - 1] + '</b>').join(' · ');
+  }
+
   async function initAuth(){
     let cfg = null;
     try { cfg = await fetch('/api/config').then(r => r.json()); } catch {}
+    if (cfg && cfg.points) renderLadder(cfg.points);
     if (!cfg || !cfg.google){ authEnabled = false; updateAuthUI(); return; }
     authEnabled = true; updateAuthUI();
     const s = document.createElement('script');
