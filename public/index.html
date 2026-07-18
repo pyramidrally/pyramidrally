@@ -159,6 +159,22 @@
   .eRow .eFact{color:#7a8a6e;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   table.lb td.fc{width:26px;padding:2px 2px 2px 0}
   .lbFace{width:22px;height:22px;display:block}
+
+  /* account + championship */
+  .monthNav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+  .monthNav button{background:#fff;border:2px solid #c8d8b8;color:#7a8a6e;border-radius:9px;
+    font-size:15px;font-weight:800;padding:3px 11px;cursor:pointer}
+  .monthNav button:disabled{opacity:.35}
+  .monthNav b{font-family:'Archivo Black',sans-serif;font-size:13px;letter-spacing:.5px;color:var(--dgreen)}
+  table.mt{border-collapse:collapse;width:100%}
+  table.mt td{padding:5px 6px;font-size:13px;border-bottom:1px solid #eef4e6}
+  table.mt tr:last-child td{border-bottom:none}
+  table.mt td.p{text-align:right;font-weight:800;color:var(--dgreen);white-space:nowrap}
+  table.mt td.d{text-align:right;color:#a5b199;font-size:11px;white-space:nowrap}
+  table.mt tr.me td{background:var(--soft)}
+  .acct{color:var(--green);font-weight:800;margin-left:3px}
+  #authBox .fineprint{text-align:left}
+  #gBtn{display:flex;justify-content:center;min-height:42px}
 </style>
 </head>
 <body>
@@ -224,6 +240,26 @@
     <img id="crewQr" alt="co-driver QR" style="width:110px;height:110px;border-radius:10px">
   </div>
 
+  <div class="card" id="authBox" style="display:none">
+    <div class="cardHead">account</div>
+    <div id="authedOut">
+      <div class="fineprint">Sign in to bank <b>monthly championship points</b>: 100 for winning a daily, 99 for 2nd… down to 1 for 100th. Anonymous runs still make the daily board, they just don't score.</div>
+      <div id="gBtn"></div>
+    </div>
+    <div id="authedIn" style="display:none">
+      <div class="fineprint">✓ signed in as <b id="acctName">—</b> · your results now score points. Change your display name in the driver card above.</div>
+      <button class="tog" id="signOutBtn" style="margin-top:8px">SIGN OUT</button>
+    </div>
+  </div>
+
+  <div class="card" id="monthBox">
+    <div class="cardHead">championship</div>
+    <div class="monthNav">
+      <button id="monthPrev">‹</button><b id="monthLabel">—</b><button id="monthNext">›</button>
+    </div>
+    <div id="monthBody"><span class="spin"></span></div>
+  </div>
+
   <div class="card">
     <div class="cardHead">today's times</div>
     <div id="lbBox"><span class="spin"></span></div>
@@ -265,6 +301,7 @@
   <div class="medalBig" id="finMedal"></div>
   <div class="finishTime" id="finTime"></div>
   <div id="finSub" style="font-size:14px;color:#5a6a4e;margin-bottom:6px"></div>
+  <div id="finPoints" style="font-size:14px;font-weight:800;margin-bottom:6px"></div>
   <div class="ateBox"><span class="h" id="ateH">🥗 0</span><span class="j" id="ateJ">🍟 0</span></div>
   <div id="finEaten"></div>
   <div class="pyramidTip" id="finTip"></div>
@@ -1033,18 +1070,28 @@
 
   // ============ networking ============
   let ws = null, myId = null, lb = [], worldGhost = null, online = false;
+  let authEnabled = false, signedIn = false, myPubId = null;
+  let session = null;
+  try { session = localStorage.getItem('pr-session'); } catch {}
   const others = new Map(); // id -> {n, face, x,y,sz, tx,ty, seen}
   function connect(){
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     try { ws = new WebSocket(`${proto}://${location.host}`); } catch { return; }
     ws.addEventListener('open', () => {
       online = true;
-      ws.send(JSON.stringify({ t: 'hello', name: profile.name || 'RACER', face: profile.face }));
+      ws.send(JSON.stringify({ t: 'hello', name: profile.name || 'RACER', face: profile.face, session: session || undefined }));
     });
     ws.addEventListener('message', (e) => {
       let m; try { m = JSON.parse(e.data); } catch { return; }
       if (m.t === 'welcome'){
         myId = m.id; lb = m.lb || []; worldGhost = m.ghost || null;
+        authEnabled = !!m.auth; signedIn = !!m.signedIn; myPubId = m.myPubId || null;
+        if (signedIn && m.name && m.name !== profile.name){
+          profile.name = m.name; saveProfile(); $('pname').value = m.name;
+        }
+        if (session && !signedIn){ session = null; try { localStorage.removeItem('pr-session'); } catch {} }
+        updateAuthUI();
+        if (m.month){ monthList = [m.month]; monthIdx = 0; renderMonth(m.month, m.standings || []); }
         renderLb($('lbBox')); renderLb($('lbBox2'));
         $('liveNow').innerHTML = `<span class="dot"></span>${m.racing} racing now`;
         if (m.crew && $('crewCode')){
@@ -1083,6 +1130,17 @@
         lb = m.lb; worldGhost = m.ghost || worldGhost;
         renderLb($('lbBox')); renderLb($('lbBox2'));
         finishAck(m.rank, m.total);
+        const fp = $('finPoints');
+        if (m.signedIn){
+          fp.style.color = 'var(--dgreen)';
+          fp.textContent = m.points > 0
+            ? `🏆 +${m.points} championship points (P${m.rank} today)`
+            : '🏆 no points — top 100 only';
+        } else if (authEnabled){
+          fp.style.color = '#c96a1d';
+          fp.textContent = '🏆 sign in to earn points for this result';
+        } else fp.textContent = '';
+        if (m.month) renderMonth(m.month, m.standings || []);
       }
     });
     ws.addEventListener('close', () => {
@@ -1092,6 +1150,95 @@
     });
   }
   connect();
+  // ============ accounts & monthly championship ============
+  function reconnectSoon(){ try { if (ws) ws.close(); } catch {} } // close handler retries
+
+  function updateAuthUI(){
+    if (!$('authBox')) return;
+    $('authBox').style.display = authEnabled ? '' : 'none';
+    $('authedOut').style.display = signedIn ? 'none' : '';
+    $('authedIn').style.display = signedIn ? '' : 'none';
+    if (signedIn) $('acctName').textContent = profile.name || '—';
+  }
+
+  async function onCredential(resp){
+    try {
+      const r = await fetch('/api/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: resp.credential }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'could not verify sign-in');
+      session = j.session; signedIn = true; myPubId = j.id;
+      try { localStorage.setItem('pr-session', session); } catch {}
+      if (j.name){ profile.name = j.name; saveProfile(); $('pname').value = j.name; }
+      updateAuthUI();
+      toast('Signed in — welcome, ' + (j.name || 'racer') + '!');
+      reconnectSoon();
+    } catch (e){ toast('Sign-in failed: ' + e.message); }
+  }
+
+  async function initAuth(){
+    let cfg = null;
+    try { cfg = await fetch('/api/config').then(r => r.json()); } catch {}
+    if (!cfg || !cfg.google){ authEnabled = false; updateAuthUI(); return; }
+    authEnabled = true; updateAuthUI();
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client'; s.async = true; s.defer = true;
+    s.onload = () => {
+      try {
+        google.accounts.id.initialize({ client_id: cfg.google, callback: onCredential });
+        google.accounts.id.renderButton($('gBtn'), { theme: 'outline', size: 'large', shape: 'pill', text: 'signin_with' });
+      } catch {}
+    };
+    document.head.appendChild(s);
+  }
+
+  if ($('signOutBtn')) $('signOutBtn').addEventListener('click', () => {
+    session = null; signedIn = false; myPubId = null;
+    try { localStorage.removeItem('pr-session'); } catch {}
+    try { google.accounts.id.disableAutoSelect(); } catch {}
+    updateAuthUI(); reconnectSoon(); toast('Signed out');
+  });
+
+  const MONTH_NAMES = ['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY',
+                       'AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER'];
+  let monthList = [], monthIdx = 0;
+  function monthLabel(ym){
+    const [y, mo] = ym.split('-');
+    return MONTH_NAMES[parseInt(mo, 10) - 1] + ' ' + y;
+  }
+  function renderMonth(ym, standings){
+    if (!$('monthBody')) return;
+    $('monthLabel').textContent = monthLabel(ym);
+    $('monthPrev').disabled = monthIdx >= monthList.length - 1;
+    $('monthNext').disabled = monthIdx <= 0;
+    if (!standings.length){
+      $('monthBody').innerHTML = '<div class="note">No championship points yet this month — win a daily to start scoring.</div>';
+      return;
+    }
+    const rows = standings.slice(0, 20).map((s, i) => {
+      const mine = myPubId && s.id === myPubId;
+      const medal = ['🥇','🥈','🥉'][i] || (i + 1) + '.';
+      return `<tr class="${mine ? 'me' : ''}"><td>${medal}</td><td>${esc(s.n)}</td>` +
+             `<td class="d">${s.days}d${s.wins ? ' · ' + s.wins + '🏆' : ''}</td>` +
+             `<td class="p">${s.pts}</td></tr>`;
+    }).join('');
+    $('monthBody').innerHTML = `<table class="mt">${rows}</table>`;
+  }
+  async function loadMonth(ym){
+    try {
+      const j = await fetch('/api/monthly' + (ym ? '?m=' + ym : '')).then(r => r.json());
+      monthList = (j.months && j.months.length) ? j.months : [j.month];
+      monthIdx = Math.max(0, monthList.indexOf(j.month));
+      renderMonth(j.month, j.standings || []);
+    } catch {}
+  }
+  if ($('monthPrev')){
+    $('monthPrev').addEventListener('click', () => { if (monthIdx < monthList.length - 1) loadMonth(monthList[monthIdx + 1]); });
+    $('monthNext').addEventListener('click', () => { if (monthIdx > 0) loadMonth(monthList[monthIdx - 1]); });
+  }
+
   function sendHelloUpdate(){
     if (ws && ws.readyState === 1 && myId) ws.send(JSON.stringify({ t: 'rename', name: profile.name || 'RACER', face: profile.face }));
   }
@@ -1117,14 +1264,15 @@
     if (!online && !lb.length){ box.innerHTML = '<div class="note">Connecting…</div>'; return; }
     if (!lb.length){ box.innerHTML = '<div class="note">No times yet — set the first one!</div>'; return; }
     const faceCell = i => `<td class="fc"><canvas class="lbFace" width="40" height="40" data-i="${i}"></canvas></td>`;
+    const isMine = e => (myPubId && e.id) ? e.id === myPubId : (!e.a && profile.name && e.n === profile.name);
+    const badge = e => e.a ? '<span class="acct" title="signed in — scoring championship points">✓</span>' : '';
     const rows = lb.slice(0, 10).map((e, i) => {
-      const me = profile.name && e.n === profile.name;
       const medal = ['🥇','🥈','🥉'][i] || (i + 1) + '.';
-      return `<tr class="${me ? 'me' : ''}"><td>${medal}</td>${faceCell(i)}<td>${esc(e.n)}</td><td class="r">${fmt(e.t)}</td></tr>`;
+      return `<tr class="${isMine(e) ? 'me' : ''}"><td>${medal}</td>${faceCell(i)}<td>${esc(e.n)}${badge(e)}</td><td class="r">${fmt(e.t)}</td></tr>`;
     }).join('');
     let mine = '';
-    const myIdx = lb.findIndex(e => e.n === profile.name);
-    if (myIdx >= 10) mine = `<tr class="me"><td>${myIdx + 1}.</td>${faceCell(myIdx)}<td>${esc(profile.name)}</td><td class="r">${fmt(lb[myIdx].t)}</td></tr>`;
+    const myIdx = lb.findIndex(isMine);
+    if (myIdx >= 10) mine = `<tr class="me"><td>${myIdx + 1}.</td>${faceCell(myIdx)}<td>${esc(lb[myIdx].n)}${badge(lb[myIdx])}</td><td class="r">${fmt(lb[myIdx].t)}</td></tr>`;
     box.innerHTML = `<table class="lb">${rows}${mine}</table>`;
     box.querySelectorAll('canvas.lbFace').forEach(cv => {
       const e = lb[+cv.dataset.i];
@@ -2172,6 +2320,8 @@
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
+  initAuth();
+  loadMonth();
 })();
 </script>
 </body>

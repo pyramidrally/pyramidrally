@@ -9,6 +9,7 @@ jump the ramps, mind the rocks, and don't fall off the bridges.
 
 ## Features
 - 🌍 Daily seeded stage — identical for every player, every run (items included)
+- 🏆 Monthly championship: points (100…1) for every daily, for signed-in drivers
 - 🍜 20 rotating cuisines (Korean, Vietnamese, Polish, Mexican, Turkish, Caribbean…), each with its own GO/WHOA foods and one-line nutrition facts
 - 🏁 Real service-park start queue: the server marshal releases the next driver 3 s after the previous one crosses the line — no bots, only real people
 - 🚗 Momentum + grip physics: brake into corners and the tail drifts out
@@ -26,6 +27,27 @@ npm start          # → http://localhost:3000
 ## Deploy (Render.com free tier)
 - Runtime **Node** · Build `npm install` · Start `npm start`
 - Free tier sleeps after ~15 min idle; first visitor waits ~30–50 s
+
+### Accounts & the monthly championship (optional)
+Signed-in drivers bank championship points from every daily stage: **1st = 100
+points, 2nd = 99 … 100th = 1**. Anonymous racers still appear on the daily
+board and still occupy their finishing position (so they consume that
+position's points) — they just don't bank anything. Standings are recomputed
+from the stored daily boards, so a correction to any day fixes the month.
+
+To switch accounts on:
+1. **console.cloud.google.com** → create a project
+2. **APIs & Services → OAuth consent screen** → External → fill in the basics
+3. **Credentials → Create credentials → OAuth client ID → Web application**
+4. Under *Authorized JavaScript origins* add your site, e.g.
+   `https://pyramidrally.onrender.com` (add `http://localhost:3000` for local dev)
+5. Copy the **Client ID** and set it on Render as `GOOGLE_CLIENT_ID`
+
+Optionally set `SESSION_SECRET` to any long random string; if you don't, one is
+derived from your client id + storage token so sessions still survive restarts.
+
+Without `GOOGLE_CLIENT_ID` the sign-in card and championship simply stay
+hidden and everything else works exactly as before.
 
 ### Keep the leaderboard through restarts
 The board is just a small JSON file — but Render's free tier wipes the local

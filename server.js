@@ -1,27 +1,44 @@
 /*  PYRAMID RALLY — live server
     Everyone races the same daily stage on their own device.
     The server: broadcasts live racer positions, runs the shared service-park
-    start queue, keeps the global daily leaderboard, and shares the world
-    ghost + pace notes link for co-drivers. */
+    start queue, keeps the global daily leaderboard, awards monthly
+    championship points to signed-in drivers, and relays pace notes to
+    co-drivers. */
 
 const express = require('express');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
+const auth = require('./auth');
 
 const PORT = process.env.PORT || 3000;
 const LB_FILE = path.join(__dirname, 'leaderboard.json');
 
-// ---------- persistent leaderboard storage ----------
-// The board is just a small JSON file — the problem is that Render's free
-// tier wipes the local disk on every sleep/redeploy. So we optionally mirror
-// that file somewhere that survives. Three backends, picked automatically:
-//   1. GitHub Gist  — set GIST_ID + GIST_TOKEN   (simplest: it IS a txt file,
-//                     living in a gist you own; token needs only "gist" scope)
-//   2. Upstash Redis — set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN
-//   3. Local file only (default) — resets whenever the free instance restarts
+// ---------- accounts (optional: set GOOGLE_CLIENT_ID to switch on) ----------
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const SESSION_SECRET = process.env.SESSION_SECRET ||
+  (GOOGLE_CLIENT_ID
+    ? crypto.createHash('sha256')
+        .update(GOOGLE_CLIENT_ID + '|' + (process.env.GIST_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || 'pyramid'))
+        .digest('hex')
+    : crypto.randomBytes(32).toString('hex'));
+auth.configure({ clientId: GOOGLE_CLIENT_ID, sessionSecret: SESSION_SECRET });
+
+// public, non-reversible id so a client can spot itself on a board without
+// the Google subject id ever leaving the server
+function pubId(sub) {
+  return crypto.createHmac('sha256', SESSION_SECRET).update('pub:' + sub).digest('hex').slice(0, 10);
+}
+
+// ---------- persistent storage ----------
+// The board is just a small JSON blob — the problem is that Render's free tier
+// wipes local disk on every sleep/redeploy, so we mirror it somewhere durable.
+//   1. GitHub Gist  — GIST_ID + GIST_TOKEN   (simplest: it IS a text file)
+//   2. Upstash Redis — UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN
+//   3. Local file only (default) — resets whenever the instance restarts
 const KV_URL = process.env.UPSTASH_REDIS_REST_URL;
 const KV_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const GIST_ID = process.env.GIST_ID;
@@ -55,11 +72,10 @@ async function saveRemote() {
   if (saveRemoteBusy) { saveRemoteAgain = true; return; } // never overlap writes
   saveRemoteBusy = true;
   try {
-    const body = JSON.stringify(boards);
+    const body = JSON.stringify(store);
     if (storageMode === 'upstash') {
       await fetch(`${KV_URL}/set/pr-boards`, { method: 'POST',
-        headers: { Authorization: `Bearer ${KV_TOKEN}` },
-        body: JSON.stringify(body) });
+        headers: { Authorization: `Bearer ${KV_TOKEN}` }, body: JSON.stringify(body) });
     } else {
       await fetch(`https://api.github.com/gists/${GIST_ID}`, { method: 'PATCH',
         headers: { Authorization: `Bearer ${GIST_TOKEN}`, 'User-Agent': 'pyramid-rally',
@@ -71,54 +87,96 @@ async function saveRemote() {
   if (saveRemoteAgain) { saveRemoteAgain = false; saveRemote(); }
 }
 
-const app = express();
-app.use(express.static(path.join(__dirname, 'public')));
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.get('/codriver', (req, res) => res.sendFile(path.join(__dirname, 'public', 'codriver.html')));
-
-app.get('/api/qr', async (req, res) => {
-  try {
-    const data = String(req.query.data || '').slice(0, 500);
-    const url = await QRCode.toDataURL(data, { margin: 1, width: 440,
-      color: { dark: '#1c7a35', light: '#ffffff' } });
-    res.json({ url });
-  } catch (e) { res.status(400).json({ error: 'bad qr data' }); }
-});
-
-// last 5 daily leaderboards (top 3 each)
-app.get('/api/history', async (req, res) => {
-  const days = [];
-  for (let d = 1; d <= 5; d++) {
-    const ds = new Date(Date.now() - d * 86400000).toISOString().slice(0, 10);
-    const e = boards[ds] || [];
-    days.push({ date: ds, top: e.slice(0, 3).map(x => ({ n: x.n, t: x.t })), total: e.length });
+// store = { boards: {date: [entry]}, users: {sub: {name, joined}}, months: {'YYYY-MM': [standing]} }
+// entry = { n: name, t: ms, p?: ghost path, f?: face, u?: google sub }
+let store = { boards: {}, users: {}, months: {} };
+function adoptStore(raw) {
+  if (!raw || typeof raw !== 'object') return;
+  if (raw.boards && typeof raw.boards === 'object') {
+    store.boards = raw.boards;
+    store.users = raw.users || {};
+    store.months = raw.months || {};
+  } else {
+    store.boards = raw; // migrate the old shape (bare date → entries map)
   }
-  res.json({ days, storage: storageMode });
-});
+}
+try { adoptStore(JSON.parse(fs.readFileSync(LB_FILE, 'utf8'))); } catch {}
 
-const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+function today() { return new Date().toISOString().slice(0, 10); }
+function thisMonth() { return today().slice(0, 7); }
+function board() { return (store.boards[today()] = store.boards[today()] || []); }
 
-// ---------- daily leaderboard ----------
-let boards = {}; // { 'YYYY-MM-DD': [{n, t, p?}] }  p = ghost path for top 3 only
-try { boards = JSON.parse(fs.readFileSync(LB_FILE, 'utf8')); } catch {}
+const KEEP_DAYS = 40; // enough to always recompute the current month from source
+
 let saveTimer = null;
 function saveBoards() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    const keys = Object.keys(boards).sort().slice(-7);
+    const keys = Object.keys(store.boards).sort().slice(-KEEP_DAYS);
     const slim = {};
-    for (const k of keys) slim[k] = boards[k];
-    boards = slim;
-    fs.writeFile(LB_FILE, JSON.stringify(boards), () => {});
-    saveRemote(); // mirror the file somewhere that survives disk wipes
+    for (const k of keys) slim[k] = store.boards[k];
+    store.boards = slim;
+    for (const ym of monthsInBoards()) store.months[ym] = computeMonth(ym);
+    fs.writeFile(LB_FILE, JSON.stringify(store), () => {});
+    saveRemote();
   }, 500);
 }
-function today() { return new Date().toISOString().slice(0, 10); }
-function board() { return (boards[today()] = boards[today()] || []); }
+
+// ---------- monthly championship ----------
+// Points by OVERALL finishing position on each daily stage: 1st = 100 pts,
+// 2nd = 99 … 100th = 1. Only signed-in drivers bank them; anonymous racers
+// still occupy their position (and so consume that position's points).
+function monthsInBoards() {
+  const s = new Set();
+  for (const d of Object.keys(store.boards)) s.add(d.slice(0, 7));
+  return [...s];
+}
+function computeMonth(ym) {
+  const totals = new Map();
+  const lastSeenName = new Map(); // uid -> name from their most recent entry
+  for (const date of Object.keys(store.boards).sort()) {
+    if (!date.startsWith(ym)) continue;
+    const entries = store.boards[date];
+    if (!Array.isArray(entries)) continue;
+    const n = Math.min(entries.length, 100);
+    for (let i = 0; i < n; i++) {
+      const e = entries[i];
+      if (!e || !e.u) continue; // anonymous: position burned, no points
+      const rec = totals.get(e.u) || { pts: 0, days: 0, best: 999, wins: 0 };
+      rec.pts += 100 - i;
+      rec.days++;
+      rec.best = Math.min(rec.best, i + 1);
+      if (i === 0) rec.wins++;
+      totals.set(e.u, rec);
+      if (e.n) lastSeenName.set(e.u, e.n);
+    }
+  }
+  return [...totals.entries()]
+    .map(([sub, r]) => ({
+      id: pubId(sub),
+      n: (store.users[sub] && store.users[sub].name) || lastSeenName.get(sub) || 'RACER',
+      pts: r.pts, days: r.days, best: r.best, wins: r.wins,
+    }))
+    .sort((a, b) => b.pts - a.pts || a.best - b.best || b.days - a.days)
+    .slice(0, 100);
+}
+function monthStandings(ym) {
+  // recompute from daily boards when we still have them, else the archive
+  return monthsInBoards().includes(ym) ? computeMonth(ym) : (store.months[ym] || []);
+}
+function availableMonths() {
+  const s = new Set([...monthsInBoards(), ...Object.keys(store.months || {})]);
+  return [...s].sort().reverse();
+}
+// what a given position on today's board is worth
+function pointsForRank(rank) { return rank >= 1 && rank <= 100 ? 101 - rank : 0; }
 
 function publicBoard() {
-  return board().slice(0, 100).map(e => ({ n: e.n, t: e.t, f: e.f }));
+  return board().slice(0, 100).map(e => ({
+    n: e.n, t: e.t, f: e.f,
+    a: e.u ? 1 : 0,              // signed-in? (earns points) — never expose the sub
+    id: e.u ? pubId(e.u) : undefined,
+  }));
 }
 function worldGhost() {
   const b = board();
@@ -129,16 +187,80 @@ function worldGhost() {
 (async () => {
   const remote = await loadRemote();
   if (!remote) return;
-  for (const day of Object.keys(remote)) {
-    if (!boards[day] || boards[day].length < remote[day].length) boards[day] = remote[day];
+  const before = Object.keys(store.boards).length;
+  const incoming = remote.boards || remote;
+  for (const day of Object.keys(incoming)) {
+    if (!store.boards[day] || store.boards[day].length < incoming[day].length) {
+      store.boards[day] = incoming[day];
+    }
   }
-  console.log('  Restored leaderboards from ' + storageMode + ' (' + Object.keys(remote).length + ' day(s))');
+  if (remote.users) store.users = Object.assign(remote.users, store.users);
+  if (remote.months) store.months = Object.assign({}, remote.months, store.months);
+  console.log(`  Restored ${Object.keys(store.boards).length - before} day(s) from ${storageMode}`);
 })();
+
+const app = express();
+app.use(express.json({ limit: '16kb' }));
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('/codriver', (req, res) => res.sendFile(path.join(__dirname, 'public', 'codriver.html')));
+
+app.get('/api/config', (req, res) => {
+  res.json({ google: GOOGLE_CLIENT_ID || null, storage: storageMode });
+});
+
+// exchange a Google ID token for one of our sessions
+const loginHits = new Map();
+app.post('/api/login', async (req, res) => {
+  if (!auth.enabled()) return res.status(503).json({ error: 'accounts are not enabled on this server' });
+  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?';
+  const now = Date.now();
+  const hits = (loginHits.get(ip) || []).filter(t => now - t < 60e3);
+  if (hits.length >= 20) return res.status(429).json({ error: 'too many attempts, wait a minute' });
+  hits.push(now); loginHits.set(ip, hits);
+
+  try {
+    const { sub, name } = await auth.verifyIdToken(req.body && req.body.credential);
+    const u = store.users[sub] || (store.users[sub] = { name: '', joined: today() });
+    if (!u.name) { u.name = sanitizeName(name || 'RACER'); saveBoards(); }
+    res.json({ session: auth.makeSession(sub), name: u.name, id: pubId(sub) });
+  } catch (e) {
+    res.status(401).json({ error: 'sign-in could not be verified' });
+  }
+});
+
+app.get('/api/monthly', (req, res) => {
+  const ym = /^\d{4}-\d{2}$/.test(String(req.query.m || '')) ? req.query.m : thisMonth();
+  res.json({ month: ym, months: availableMonths(), standings: monthStandings(ym) });
+});
+
+// last 5 daily leaderboards (top 3 each)
+app.get('/api/history', (req, res) => {
+  const days = [];
+  for (let d = 1; d <= 5; d++) {
+    const ds = new Date(Date.now() - d * 86400000).toISOString().slice(0, 10);
+    const e = store.boards[ds] || [];
+    days.push({ date: ds, top: e.slice(0, 3).map(x => ({ n: x.n, t: x.t })), total: e.length });
+  }
+  res.json({ days, storage: storageMode });
+});
+
+app.get('/api/qr', async (req, res) => {
+  try {
+    const data = String(req.query.data || '').slice(0, 500);
+    const url = await QRCode.toDataURL(data, { margin: 1, width: 440,
+      color: { dark: '#1c7a35', light: '#ffffff' } });
+    res.json({ url });
+  } catch (e) { res.status(400).json({ error: 'bad qr data' }); }
+});
+
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
 
 // ---------- clients & live positions ----------
 let nextId = 1;
-const clients = new Map(); // id -> {ws, name, face, live, crewCode, watchers:Set, queueJoinT}
-const crewIndex = new Map(); // crewCode -> client
+const clients = new Map();
+const crewIndex = new Map();
 function makeCrewCode() {
   const A = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   let c;
@@ -162,15 +284,10 @@ function sanitizeFace(f) {
   const COLORS = ['#ffd23f', '#ff8c2e', '#7ddb6a', '#5bd1ff', '#ff7bac', '#c9a2ff', '#f5f2e8', '#ffb35c'];
   f = f || {};
   const paint = typeof f.paint === 'string' && /^[0-8]{0,324}$/.test(f.paint) ? f.paint : '';
-  return {
-    color: COLORS.includes(f.color) ? f.color : COLORS[0],
-    paint,
-  };
+  return { color: COLORS.includes(f.color) ? f.color : COLORS[0], paint };
 }
 
-// ---------- the service-park start queue (shared by every real player) ----------
-// Rally rules: everyone queues in the park. The marshal releases the next
-// car 3 seconds after the previous one crosses the start line.
+// ---------- the service-park start queue ----------
 const marshal = { queue: [], pending: null, lastCrossT: 0 };
 function queueSnapshot() {
   return { t: 'queue', order: marshal.queue.map(c => c.id), pending: marshal.pending ? marshal.pending.id : null };
@@ -185,7 +302,7 @@ function removeFromQueue(c) {
 setInterval(() => {
   if (!marshal.pending && marshal.queue.length && Date.now() - marshal.lastCrossT >= 3000) {
     const c = marshal.queue[0];
-    if (Date.now() - (c.queueJoinT || 0) < 900) return; // minimum park dwell
+    if (Date.now() - (c.queueJoinT || 0) < 900) return;
     marshal.queue.shift();
     marshal.pending = c;
     send(c.ws, { t: 'release' });
@@ -204,8 +321,15 @@ wss.on('connection', (ws) => {
 
     if (m.t === 'hello') {
       myId = nextId++;
-      const c = { ws, id: myId, name: sanitizeName(m.name), face: sanitizeFace(m.face), live: null,
-        crewCode: makeCrewCode(), watchers: new Set(), queueJoinT: 0 };
+      const sess = m.session ? auth.readSession(m.session) : null;
+      const uid = sess ? sess.sub : null;
+      if (uid && !store.users[uid]) store.users[uid] = { name: sanitizeName(m.name), joined: today() };
+      const c = {
+        ws, id: myId, uid,
+        name: uid ? store.users[uid].name : sanitizeName(m.name),
+        face: sanitizeFace(m.face), live: null,
+        crewCode: makeCrewCode(), watchers: new Set(), queueJoinT: 0,
+      };
       clients.set(myId, c);
       crewIndex.set(c.crewCode, c);
       send(ws, {
@@ -213,6 +337,9 @@ wss.on('connection', (ws) => {
         lb: publicBoard(), ghost: worldGhost(),
         racing: liveCount(), crew: c.crewCode,
         storage: storageMode,
+        auth: auth.enabled(),
+        signedIn: !!uid, name: c.name, myPubId: uid ? pubId(uid) : null,
+        month: thisMonth(), standings: monthStandings(thisMonth()).slice(0, 20),
       });
       broadcast({ t: 'roster', id: myId, n: c.name, face: c.face }, myId);
       for (const [id, o] of clients) if (id !== myId) send(ws, { t: 'roster', id, n: o.name, face: o.face });
@@ -236,6 +363,7 @@ wss.on('connection', (ws) => {
     if (m.t === 'rename') {
       c.name = sanitizeName(m.name);
       c.face = sanitizeFace(m.face);
+      if (c.uid && store.users[c.uid]) { store.users[c.uid].name = c.name; saveBoards(); }
       broadcast({ t: 'roster', id: myId, n: c.name, face: c.face }, myId);
       for (const w of c.watchers) send(w, { t: 'drv_info', n: c.name, face: c.face });
       return;
@@ -248,15 +376,12 @@ wss.on('connection', (ws) => {
       }
       return;
     }
-    if (m.t === 'queue_leave') {
-      if (removeFromQueue(c)) broadcastQueue();
-      return;
-    }
+    if (m.t === 'queue_leave') { if (removeFromQueue(c)) broadcastQueue(); return; }
     if (m.t === 'crossed') {
       if (marshal.pending === c) { marshal.pending = null; marshal.lastCrossT = Date.now(); broadcastQueue(); }
       return;
     }
-    if (m.t === 'pos') { // during a run, ~8x/sec
+    if (m.t === 'pos') {
       const x = Number(m.x), y = Number(m.y), sz = Number(m.sz);
       if (Number.isFinite(x) && Number.isFinite(y)) {
         c.live = { x: Math.round(x), y: Math.round(y), sz: Math.min(4, Math.max(0, sz | 0)) };
@@ -276,19 +401,33 @@ wss.on('connection', (ws) => {
       if (removeFromQueue(c)) broadcastQueue();
       for (const w of c.watchers) send(w, { t: 'drv_end' });
       const t = Math.round(Number(m.time));
-      if (!Number.isFinite(t) || t < 20000 || t > 120000) return; // basic sanity: 20s–120s
-      let p = Array.isArray(m.path) && m.path.length <= 3000 ? m.path.map(v => Math.round(Number(v)) || 0) : null;
+      if (!Number.isFinite(t) || t < 20000 || t > 120000) return; // sanity: 20s–120s
+      const p = Array.isArray(m.path) && m.path.length <= 3000 ? m.path.map(v => Math.round(Number(v)) || 0) : null;
       const b = board();
-      const mine = b.find(e => e.n === c.name);
+      // signed-in drivers are keyed by account, anonymous ones by name — so
+      // nobody can overwrite an account holder's time by typing their name
+      const mine = c.uid ? b.find(e => e.u === c.uid) : b.find(e => !e.u && e.n === c.name);
       let improved = false;
-      if (!mine) { b.push({ n: c.name, t, p, f: { color: c.face.color, paint: c.face.paint } }); improved = true; }
-      else if (t < mine.t) { mine.t = t; mine.p = p; mine.f = { color: c.face.color, paint: c.face.paint }; improved = true; }
+      if (!mine) {
+        b.push({ n: c.name, t, p, f: { color: c.face.color, paint: c.face.paint }, u: c.uid || undefined });
+        improved = true;
+      } else if (t < mine.t) {
+        mine.t = t; mine.p = p; mine.n = c.name;
+        mine.f = { color: c.face.color, paint: c.face.paint };
+        improved = true;
+      }
       b.sort((a, x) => a.t - x.t);
       b.splice(100);
       b.forEach((e, i) => { if (i >= 3) delete e.p; });
       saveBoards();
-      const rank = b.findIndex(e => e.n === c.name) + 1;
-      send(ws, { t: 'finish_ack', rank, total: b.length, lb: publicBoard(), ghost: worldGhost() });
+      const rank = (c.uid ? b.findIndex(e => e.u === c.uid) : b.findIndex(e => !e.u && e.n === c.name)) + 1;
+      send(ws, {
+        t: 'finish_ack', rank, total: b.length, lb: publicBoard(), ghost: worldGhost(),
+        points: c.uid ? pointsForRank(rank) : 0,
+        signedIn: !!c.uid,
+        month: thisMonth(),
+        standings: monthStandings(thisMonth()).slice(0, 20),
+      });
       if (improved) {
         broadcast({ t: 'event', msg: `🏁 ${c.name} — ${(t / 1000).toFixed(2)}s (#${rank})` }, myId);
         broadcast({ t: 'lb', lb: publicBoard() }, myId);
@@ -318,14 +457,12 @@ function liveCount() {
   return n;
 }
 
-// broadcast live positions 7x/sec: [id, x, y, size] for every active runner
 setInterval(() => {
   const list = [];
   for (const [id, c] of clients) if (c.live) list.push([id, c.live.x, c.live.y, c.live.sz]);
   if (clients.size) broadcast({ t: 'live', l: list, racing: list.length });
 }, 140);
 
-// heartbeat
 setInterval(() => {
   wss.clients.forEach((ws) => {
     if (!ws.isAlive) return ws.terminate();
@@ -338,5 +475,8 @@ server.listen(PORT, () => {
   console.log('  🍏 PYRAMID RALLY server running!');
   console.log(`  Play at:  http://localhost:${PORT}`);
   console.log(`  Leaderboard storage: ${storageMode === 'file' ? 'local file (resets on redeploy — see README)' : storageMode + ' (persistent)'}`);
+  console.log(`  Accounts: ${auth.enabled() ? 'Google Sign-In enabled' : 'disabled (set GOOGLE_CLIENT_ID to enable)'}`);
   console.log('');
 });
+
+module.exports = { computeMonth, pointsForRank, store, adoptStore };
