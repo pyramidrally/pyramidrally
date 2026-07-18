@@ -1,45 +1,50 @@
-# 🍏 PYRAMID RALLY — eat smart, race fast
+# 🍏 PYRAMID RALLY
 
-A daily food-pyramid racing game. One new stage and cuisine per day (same for the whole world, like Wordle). Grab **GO foods** 🥗 to shrink down and boost; dodge **WHOA foods** 🍟 or your face puffs up and squeezing through gaps gets hard. Race against your own ghosts, the world-record ghost, and everyone playing **live right now**.
+A daily rally stage where the healthy food pyramid fights back. Everyone in the
+world races the same procedurally generated stage each day — eat GO foods to
+shrink and boost, dodge WHOA foods that puff you up, drift through hairpins,
+jump the ramps, mind the rocks, and don't fall off the bridges.
 
-## Quick start
+**art of rally × wordle × WRC — but make it nutrition.**
 
-1. Install Node.js (v18+) from https://nodejs.org
-2. In this folder:
-   ```
-   npm install
-   npm start
-   ```
-3. Open `http://localhost:3000` — everyone who opens the same URL races today's stage together, live.
+## Features
+- 🌍 Daily seeded stage — identical for every player, every run (items included)
+- 🍜 20 rotating cuisines (Korean, Vietnamese, Polish, Mexican, Turkish, Caribbean…), each with its own GO/WHOA foods and one-line nutrition facts
+- 🏁 Real service-park start queue: the server marshal releases the next driver 3 s after the previous one crosses the line — no bots, only real people
+- 🚗 Momentum + grip physics: brake into corners and the tail drifts out
+- 💧 Water shields, 🪨 rocks, jump ramps, bridges, one-lane narrows
+- 👥 Live positions of every racer, world-record ghost, personal ghosts
+- 🗣 Co-driver mode: scan the crew QR (or open `/codriver`, enter the 4-letter code) to read live pace notes to your driver
+- 🎻 Public-domain classical menu music, synthesized in-browser (Für Elise, Ode to Joy, an original Bach-style minuet)
+- 📻 Proximity crowd noise from the veggie fans
 
-To let the whole world play, deploy this folder to any Node host (Railway, Render, Fly.io, a VPS). It listens on `process.env.PORT`, so most platforms need zero config. The daily leaderboard persists in `leaderboard.json` (last 7 days kept).
-
-## How it works
-
-- **Daily stage**: track layout, food placement and cuisine (Asian 🥢 / American 🍔 / Indian 🍛 / Italian 🍝 / French 🥐) are generated from the UTC date — identical for every player, everywhere.
-- **Rolling start**: no countdown. Drive over the START line and the clock begins.
-- **The pyramid mechanic**: every WHOA food you touch makes your face one size bigger — slower turning, slightly slower top speed, bigger hitbox. GO foods shrink you back one size and give a speed boost. Every food shows a real one-line nutrition fact when eaten.
-- **Live racers**: other players currently on the stage appear on your track and minimap in real time (positions relayed ~7×/sec — a few bytes each, so hundreds of players are fine).
-- **Ghosts**: your PB + last attempts (saved on your device) and the world-record ghost (from the server), toggleable.
-- **Leaderboard**: one global board per day, best time per name, live finish ticker.
-- Extras: paint-your-own face editor (pixel paint, 8 colors), split-time deltas at checkpoints, medals (🥇 64s / 🥈 74s / 🥉 90s), Wordle-style share button, daily streak, next-stage countdown.
-
-## Controls
-
-Hold the left/right sides of the screen (or arrow keys / A–D). Your face rolls forward automatically.
-
-## Project layout
-
+## Run locally
 ```
-server.js           live position relay + daily leaderboard (persisted to leaderboard.json)
-public/index.html   the whole game: track generator, physics, ghosts, minimap, UI
+npm install
+npm start          # → http://localhost:3000
 ```
 
-## Notes
+## Deploy (Render.com free tier)
+- Runtime **Node** · Build `npm install` · Start `npm start`
+- Free tier sleeps after ~15 min idle; first visitor waits ~30–50 s
 
-- The anti-cheat is basic (impossible times are rejected server-side); for a public competitive deployment you'd want stronger validation.
-- Tracks are stress-tested: the generator guarantees no overlapping roads and a finishable stage every day.
+### Keep the leaderboard through restarts (free)
+Render's free disk is wiped on every sleep/redeploy. To persist the boards:
+1. Create a free Redis database at **upstash.com** (no card needed)
+2. In the database page, copy the **REST URL** and **REST TOKEN**
+3. In Render → your service → **Environment**, add:
+   - `UPSTASH_REDIS_REST_URL` = the REST URL
+   - `UPSTASH_REDIS_REST_TOKEN` = the REST token
+4. Redeploy. Boot log should say `Leaderboard storage: Upstash Redis (persistent)`
 
-## Food fact sources
+Without these vars the game still works — boards just reset when the free
+instance restarts.
 
-The GO/WHOA framing and in-game nutrition facts are simplified from: NIH "We Can!" GO-SLOW-WHOA foods (nhlbi.nih.gov/health/educational/wecan), the WHO healthy diet fact sheet (who.int), USDA MyPlate (myplate.gov), and Harvard's Nutrition Source (nutritionsource.hsph.harvard.edu). The game is for fun and learning, not medical or dietary advice — WHOA foods are "sometimes" foods, not forbidden ones.
+## Files
+- `server.js` — Express + WebSocket: live positions, global daily leaderboard, start-queue marshal, crew codes, QR endpoint
+- `public/index.html` — the whole game
+- `public/codriver.html` — live pace-notes page for co-drivers
+
+Nutrition framing is based on NIH "We Can!" GO/SLOW/WHOA, WHO healthy-diet
+guidance, USDA MyPlate and Harvard's Nutrition Source. It's a game, not
+dietary advice — WHOA foods are "sometimes" foods, not forbidden ones.

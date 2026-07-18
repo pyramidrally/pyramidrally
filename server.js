@@ -1,7 +1,8 @@
 /*  PYRAMID RALLY — live server
     Everyone races the same daily stage on their own device.
-    The server: broadcasts live racer positions, keeps the global daily
-    leaderboard (persisted to disk), and shares the world-record ghost. */
+    The server: broadcasts live racer positions, runs the shared service-park
+    start queue, keeps the global daily leaderboard, and shares the world
+    ghost + pace notes link for co-drivers. */
 
 const express = require('express');
 const http = require('http');
@@ -12,6 +13,34 @@ const QRCode = require('qrcode');
 
 const PORT = process.env.PORT || 3000;
 const LB_FILE = path.join(__dirname, 'leaderboard.json');
+
+// ---------- optional free persistent storage (Upstash Redis REST) ----------
+// Render's free tier wipes local disk on every sleep/restart. Set these two
+// env vars (free Upstash database) to survive that; without them the game
+// still works, just using the local file as before.
+const KV_URL = process.env.UPSTASH_REDIS_REST_URL;
+const KV_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+const kvEnabled = !!(KV_URL && KV_TOKEN);
+async function kvGet(key) {
+  if (!kvEnabled) return null;
+  try {
+    const r = await fetch(`${KV_URL}/get/${encodeURIComponent(key)}`, {
+      headers: { Authorization: `Bearer ${KV_TOKEN}` },
+    });
+    const j = await r.json();
+    return j && j.result ? JSON.parse(j.result) : null;
+  } catch { return null; }
+}
+async function kvSet(key, val) {
+  if (!kvEnabled) return;
+  try {
+    await fetch(`${KV_URL}/set/${encodeURIComponent(key)}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${KV_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(JSON.stringify(val)),
+    });
+  } catch {}
+}
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
@@ -28,48 +57,57 @@ app.get('/api/qr', async (req, res) => {
 });
 
 // last 5 daily leaderboards (top 3 each)
-app.get('/api/history', (req, res) => {
+app.get('/api/history', async (req, res) => {
   const days = [];
   for (let d = 1; d <= 5; d++) {
     const ds = new Date(Date.now() - d * 86400000).toISOString().slice(0, 10);
-    const e = boards[ds] || [];
+    let e = boards[ds];
+    if (!e && kvEnabled) { e = await kvGet('pr-lb-' + ds); if (e) boards[ds] = e; }
+    e = e || [];
     days.push({ date: ds, top: e.slice(0, 3).map(x => ({ n: x.n, t: x.t })), total: e.length });
   }
-  res.json({ days });
+  res.json({ days, storage: kvEnabled ? 'upstash' : 'file' });
 });
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// ---------- daily leaderboard (persisted) ----------
+// ---------- daily leaderboard ----------
 let boards = {}; // { 'YYYY-MM-DD': [{n, t, p?}] }  p = ghost path for top 3 only
 try { boards = JSON.parse(fs.readFileSync(LB_FILE, 'utf8')); } catch {}
 let saveTimer = null;
 function saveBoards() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    // keep only the last 7 days on disk
     const keys = Object.keys(boards).sort().slice(-7);
     const slim = {};
     for (const k of keys) slim[k] = boards[k];
     boards = slim;
     fs.writeFile(LB_FILE, JSON.stringify(boards), () => {});
+    kvSet('pr-lb-' + today(), boards[today()] || []); // survives disk wipes
   }, 500);
 }
 function today() { return new Date().toISOString().slice(0, 10); }
 function board() { return (boards[today()] = boards[today()] || []); }
 
 function publicBoard() {
-  return board().slice(0, 100).map(e => ({ n: e.n, t: e.t }));
+  return board().slice(0, 100).map(e => ({ n: e.n, t: e.t, f: e.f }));
 }
 function worldGhost() {
   const b = board();
   return b.length && b[0].p ? { n: b[0].n, t: b[0].t, p: b[0].p } : null;
 }
 
+// on boot, if Upstash is configured, pull today's board in case local disk was wiped
+(async () => {
+  if (!kvEnabled) return;
+  const remote = await kvGet('pr-lb-' + today());
+  if (remote && (!boards[today()] || !boards[today()].length)) boards[today()] = remote;
+})();
+
 // ---------- clients & live positions ----------
 let nextId = 1;
-const clients = new Map(); // id -> {ws, name, face, live, crewCode, watchers:Set}
+const clients = new Map(); // id -> {ws, name, face, live, crewCode, watchers:Set, queueJoinT}
 const crewIndex = new Map(); // crewCode -> client
 function makeCrewCode() {
   const A = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -100,6 +138,31 @@ function sanitizeFace(f) {
   };
 }
 
+// ---------- the service-park start queue (shared by every real player) ----------
+// Rally rules: everyone queues in the park. The marshal releases the next
+// car 3 seconds after the previous one crosses the start line.
+const marshal = { queue: [], pending: null, lastCrossT: 0 };
+function queueSnapshot() {
+  return { t: 'queue', order: marshal.queue.map(c => c.id), pending: marshal.pending ? marshal.pending.id : null };
+}
+function broadcastQueue() { broadcast(queueSnapshot()); }
+function removeFromQueue(c) {
+  const before = marshal.queue.length;
+  marshal.queue = marshal.queue.filter(e => e !== c);
+  if (marshal.pending === c) marshal.pending = null;
+  return before !== marshal.queue.length;
+}
+setInterval(() => {
+  if (!marshal.pending && marshal.queue.length && Date.now() - marshal.lastCrossT >= 3000) {
+    const c = marshal.queue[0];
+    if (Date.now() - (c.queueJoinT || 0) < 900) return; // minimum park dwell
+    marshal.queue.shift();
+    marshal.pending = c;
+    send(c.ws, { t: 'release' });
+    broadcastQueue();
+  }
+}, 250);
+
 wss.on('connection', (ws) => {
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
@@ -111,18 +174,19 @@ wss.on('connection', (ws) => {
 
     if (m.t === 'hello') {
       myId = nextId++;
-      const c = { ws, name: sanitizeName(m.name), face: sanitizeFace(m.face), live: null,
-        crewCode: makeCrewCode(), watchers: new Set() };
+      const c = { ws, id: myId, name: sanitizeName(m.name), face: sanitizeFace(m.face), live: null,
+        crewCode: makeCrewCode(), watchers: new Set(), queueJoinT: 0 };
       clients.set(myId, c);
       crewIndex.set(c.crewCode, c);
       send(ws, {
         t: 'welcome', id: myId, date: today(),
         lb: publicBoard(), ghost: worldGhost(),
         racing: liveCount(), crew: c.crewCode,
+        storage: kvEnabled ? 'upstash' : 'file',
       });
       broadcast({ t: 'roster', id: myId, n: c.name, face: c.face }, myId);
-      // send the newcomer everyone else's roster info
       for (const [id, o] of clients) if (id !== myId) send(ws, { t: 'roster', id, n: o.name, face: o.face });
+      send(ws, queueSnapshot());
       return;
     }
     if (m.t === 'watch') {
@@ -146,6 +210,22 @@ wss.on('connection', (ws) => {
       for (const w of c.watchers) send(w, { t: 'drv_info', n: c.name, face: c.face });
       return;
     }
+    if (m.t === 'queue_join') {
+      if (!marshal.queue.includes(c) && marshal.pending !== c) {
+        c.queueJoinT = Date.now();
+        marshal.queue.push(c);
+        broadcastQueue();
+      }
+      return;
+    }
+    if (m.t === 'queue_leave') {
+      if (removeFromQueue(c)) broadcastQueue();
+      return;
+    }
+    if (m.t === 'crossed') {
+      if (marshal.pending === c) { marshal.pending = null; marshal.lastCrossT = Date.now(); broadcastQueue(); }
+      return;
+    }
     if (m.t === 'pos') { // during a run, ~8x/sec
       const x = Number(m.x), y = Number(m.y), sz = Number(m.sz);
       if (Number.isFinite(x) && Number.isFinite(y)) {
@@ -154,18 +234,25 @@ wss.on('connection', (ws) => {
       }
       return;
     }
-    if (m.t === 'run_end') { c.live = null; for (const w of c.watchers) send(w, { t: 'drv_end' }); return; }
+    if (m.t === 'run_end') {
+      c.live = null;
+      if (removeFromQueue(c)) broadcastQueue();
+      for (const w of c.watchers) send(w, { t: 'drv_end' });
+      return;
+    }
 
     if (m.t === 'finish') {
       c.live = null;
+      if (removeFromQueue(c)) broadcastQueue();
+      for (const w of c.watchers) send(w, { t: 'drv_end' });
       const t = Math.round(Number(m.time));
-      if (!Number.isFinite(t) || t < 25000 || t > 120000) return; // basic sanity: 25s–120s
+      if (!Number.isFinite(t) || t < 20000 || t > 120000) return; // basic sanity: 20s–120s
       let p = Array.isArray(m.path) && m.path.length <= 3000 ? m.path.map(v => Math.round(Number(v)) || 0) : null;
       const b = board();
       const mine = b.find(e => e.n === c.name);
       let improved = false;
-      if (!mine) { b.push({ n: c.name, t, p }); improved = true; }
-      else if (t < mine.t) { mine.t = t; mine.p = p; improved = true; }
+      if (!mine) { b.push({ n: c.name, t, p, f: { color: c.face.color, paint: c.face.paint } }); improved = true; }
+      else if (t < mine.t) { mine.t = t; mine.p = p; mine.f = { color: c.face.color, paint: c.face.paint }; improved = true; }
       b.sort((a, x) => a.t - x.t);
       b.splice(100);
       b.forEach((e, i) => { if (i >= 3) delete e.p; });
@@ -185,6 +272,7 @@ wss.on('connection', (ws) => {
     if (myId != null) {
       const c = clients.get(myId);
       if (c) {
+        if (removeFromQueue(c)) broadcastQueue();
         for (const w of c.watchers) send(w, { t: 'drv_gone' });
         crewIndex.delete(c.crewCode);
       }
@@ -219,6 +307,6 @@ server.listen(PORT, () => {
   console.log('');
   console.log('  🍏 PYRAMID RALLY server running!');
   console.log(`  Play at:  http://localhost:${PORT}`);
-  console.log('  Everyone who opens this URL races today\'s stage together — live.');
+  console.log(`  Leaderboard storage: ${kvEnabled ? 'Upstash Redis (persistent)' : 'local file (resets on redeploy — see README)'}`);
   console.log('');
 });

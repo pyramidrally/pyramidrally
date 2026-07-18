@@ -83,10 +83,12 @@
   .evt{font-size:11px;font-weight:700;color:#5a6a4e;background:rgba(255,255,255,.85);border:1px solid #c8d8b8;
     border-radius:14px;padding:5px 10px;animation:evt 4s ease forwards}
   @keyframes evt{0%{opacity:0;transform:translateX(-12px)}10%{opacity:1;transform:none}80%{opacity:1}100%{opacity:0}}
-  #muteBtn{position:fixed;top:12px;left:calc(50% + 6px);z-index:7;background:rgba(255,255,255,.88);
-    border:2px solid #c8d8b8;border-radius:12px;color:#7a8a6e;font-size:15px;padding:6px 10px;cursor:pointer}
-  #restartBtn{position:fixed;top:12px;right:calc(50% + 6px);z-index:7;background:rgba(255,255,255,.88);
-    border:2px solid #c8d8b8;border-radius:12px;color:var(--dgreen);font-size:15px;font-weight:800;padding:6px 11px;cursor:pointer}
+  #hudButtons{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:7;display:flex;gap:8px}
+  #hudButtons button{background:rgba(255,255,255,.88);border:2px solid #c8d8b8;border-radius:12px;
+    font-size:15px;font-weight:800;padding:6px 11px;cursor:pointer}
+  #muteBtn{color:#7a8a6e}
+  #restartBtn{color:var(--dgreen)}
+  #homeBtn{color:#7a8a6e;font-size:13px}
   #controls{position:fixed;bottom:0;left:0;right:0;height:96px;display:flex;z-index:5}
   .ctl{flex:1;display:flex;align-items:center;justify-content:center;font-family:'Press Start 2P',monospace;
     font-size:22px;color:rgba(35,51,31,.35);background:rgba(255,255,255,.55);border-top:2px solid #c8d8b8}
@@ -147,6 +149,19 @@
     text-transform:uppercase;color:#8a9a7c;padding:13px 4px}
   .overlay.v2 table.lb td{font-size:13px}
   #crewBox img{display:block;margin:0 auto}
+
+  /* post-race menu + leaderboard faces */
+  #finEaten{max-height:170px;overflow-y:auto;width:100%;margin:8px 0;text-align:left;
+    border:1px solid #e2ecd6;border-radius:12px;padding:6px 10px;background:#fbfdf7}
+  .eRow{display:flex;align-items:baseline;gap:8px;padding:4px 0;border-bottom:1px dashed #edf3e3;font-size:12px}
+  .eRow:last-child{border-bottom:none}
+  .eRow .eIco{font-size:16px;flex:0 0 auto}
+  .eRow .eName{font-weight:800;color:var(--dgreen);white-space:nowrap;flex:0 0 auto}
+  .eRow.j .eName{color:#c96a1d}
+  .eRow.b .eName{color:#2f9bc4}
+  .eRow .eFact{color:#7a8a6e;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  table.lb td.fc{width:26px;padding:2px 2px 2px 0}
+  .lbFace{width:22px;height:22px;display:block}
 </style>
 </head>
 <body>
@@ -158,8 +173,11 @@
   <div class="hudbox">SIZE<div id="sizeMeter"><i></i><i></i><i></i><i></i></div></div>
   <div class="hudbox">SPEED<div class="big" id="speedLabel">0</div></div>
 </div>
-<button id="muteBtn" class="hidden">🔊</button>
-<button id="restartBtn" class="hidden">↻</button>
+<div id="hudButtons">
+  <button id="homeBtn" class="hidden">☰ MENU</button>
+  <button id="restartBtn" class="hidden">↻</button>
+  <button id="muteBtn" class="hidden">🔊</button>
+</div>
 <div id="rollHint" class="hidden">ROLL TO THE START LINE ➜</div>
 <div id="delta"></div>
 <div id="foodToast"></div>
@@ -200,7 +218,7 @@
     <button class="tog on" id="togMine">MY GHOSTS</button>
     <button class="tog on" id="togWorld">WORLD BEST</button>
     <button class="tog on" id="togSound">SOUND</button>
-    <button class="tog on" id="togBots">BOTS</button>
+    <button class="tog on" id="togMusic">MUSIC</button>
   </div>
 
   <button class="bigbtn" id="startBtn">ENTER SERVICE PARK</button>
@@ -253,6 +271,7 @@
   <div class="finishTime" id="finTime"></div>
   <div id="finSub" style="font-size:14px;color:#5a6a4e;margin-bottom:6px"></div>
   <div class="ateBox"><span class="h" id="ateH">🥗 0</span><span class="j" id="ateJ">🍟 0</span></div>
+  <div id="finEaten"></div>
   <div class="pyramidTip" id="finTip"></div>
   <div class="note">Food facts are simplified for the game — sources &amp; how-to are in the menu.</div>
   <button class="bigbtn orange" id="retryBtn">RETRY STAGE</button>
@@ -285,16 +304,6 @@
   const seed = hashStr('pyramid-' + dateStr);
 
   const CUISINES = [
-    { name:'ASIAN 🥢', go:[
-        ['🍣','Sushi','fish = omega-3 for your brain'],
-        ['🥬','Bok choy','leafy greens: vitamins A, C & K'],
-        ['🫛','Edamame','a plant-protein powerhouse'],
-        ['🍵','Green tea','packed with antioxidants']],
-      whoa:[
-        ['🍜','Instant ramen','a whole day of sodium in one bowl'],
-        ['🍤','Tempura','deep-fried means heavy oil'],
-        ['🥠','Fortune cookie','mostly sugar, sadly'],
-        ['🧋','Bubble tea','one cup ≈ 12 teaspoons of sugar']] },
     { name:'AMERICAN 🍔', go:[
         ['🥗','Cobb salad','veggies + lean protein'],
         ['🌽','Corn on the cob','whole-grain fiber'],
@@ -335,6 +344,166 @@
         ['🧀','Fondue','a pot of melted cheese'],
         ['🍮','Crème brûlée','cream topped with burnt sugar'],
         ['🍟','Frites','fried and salty']] },
+    { name:'JAPANESE 🍱', go:[
+        ['🍣','Sashimi','lean fish, big on omega-3'],
+        ['🥗','Edamame','fiber-rich soybeans'],
+        ['🍲','Miso soup','fermented and low-calorie'],
+        ['🥦','Yasai itame','stir-fried veg, light oil']],
+      whoa:[
+        ['🍤','Tempura','battered and deep-fried'],
+        ['🍡','Dango','sweet rice dumplings in syrup'],
+        ['🍶','Sweet sake','sugar hides in the sip'],
+        ['🍥','Katsu curry','fried cutlet in a rich sauce']] },
+    { name:'CHINESE 🥡', go:[
+        ['🥬','Stir-fried bok choy','quick-cooked, nutrient-packed'],
+        ['🍤','Steamed dumplings','lighter than the fried kind'],
+        ['🍵','Oolong tea','unsweetened and antioxidant-rich'],
+        ['🍚','Brown rice','whole grain fiber']],
+      whoa:[
+        ['🍟','Sweet & sour pork','battered, fried, sugary sauce'],
+        ['🥠','Fortune cookie','mostly sugar'],
+        ['🍜','Fried noodles','oil-soaked carbs'],
+        ['🧋','Bubble tea','a sugar bomb in a cup']] },
+    { name:'KOREAN 🍲', go:[
+        ['🥬','Kimchi','fermented cabbage, gut-friendly'],
+        ['🍢','Grilled skewers','lean protein, not fried'],
+        ['🍚','Bibimbap veggies','a bowl full of colors'],
+        ['🍵','Barley tea','caffeine-free and light']],
+      whoa:[
+        ['🍗','Korean fried chicken','double-fried & glazed sweet'],
+        ['🍢','Tteokbokki','chewy cakes in sugary chili sauce'],
+        ['🍺','Sweet soju cocktails','liquid sugar and alcohol'],
+        ['🥟','Fried mandu','dumplings deep-fried']] },
+    { name:'THAI 🌶️', go:[
+        ['🥗','Som tam','shredded papaya salad, low-cal'],
+        ['🍲','Tom yum','spicy broth, light on oil'],
+        ['🦐','Grilled shrimp skewers','lean protein'],
+        ['🥦','Stir-fried greens','quick-cooked veg']],
+      whoa:[
+        ['🍛','Pad see ew','noodles soaked in oil & sugar'],
+        ['🥥','Sticky rice dessert','sugar + coconut fat combo'],
+        ['🍤','Fried spring rolls','crispy, oily wrapper'],
+        ['🧋','Thai iced tea','sweetened condensed milk overload']] },
+    { name:'VIETNAMESE 🍜', go:[
+        ['🍲','Pho broth with herbs','light and protein-rich'],
+        ['🥗','Fresh spring rolls','rice paper, not fried'],
+        ['🐟','Grilled fish','lean and simple'],
+        ['🥕','Do chua pickles','crunchy and low-calorie']],
+      whoa:[
+        ['🥖','Banh mi with pate','a rich fatty spread'],
+        ['🍤','Fried spring rolls','crispy fried shell'],
+        ['☕','Ca phe sua da','strong coffee, condensed milk sugar'],
+        ['🍮','Banh flan','caramel egg custard, sugar-heavy']] },
+    { name:'MEXICAN 🌮', go:[
+        ['🌮','Grilled fish tacos','lean protein, light toppings'],
+        ['🫘','Black beans','fiber and plant protein'],
+        ['🥑','Guacamole','healthy fats from avocado'],
+        ['🌶️','Salsa fresca','veg-based, low-calorie']],
+      whoa:[
+        ['🧀','Cheesy nachos','fried chips buried in cheese'],
+        ['🌯','Fried chimichanga','a burrito, but deep-fried'],
+        ['🍹','Frozen margarita','sugar and alcohol combined'],
+        ['🍩','Churros','fried dough rolled in sugar']] },
+    { name:'GREEK 🥙', go:[
+        ['🥙','Grilled souvlaki','lean meat, simple prep'],
+        ['🥗','Greek salad','veg, olive oil, feta'],
+        ['🫒','Olives','heart-healthy fats'],
+        ['🐙','Grilled octopus','lean seafood protein']],
+      whoa:[
+        ['🥧','Spanakopita','buttery, flaky pastry layers'],
+        ['🍯','Baklava','honey-soaked filo and nuts'],
+        ['🧀','Fried saganaki','deep-fried block of cheese'],
+        ['🥤','Sweet frappe','sugar-loaded iced coffee']] },
+    { name:'SPANISH 🥘', go:[
+        ['🐟','Grilled sardines','omega-3 rich'],
+        ['🍅','Gazpacho','cold veg soup, refreshing'],
+        ['🫒','Olive oil drizzle','good fats'],
+        ['🥗','Pan con tomate','simple bread and tomato']],
+      whoa:[
+        ['🍮','Churros con chocolate','fried dough, sugary dip'],
+        ['🥘','Fried croquetas','creamy filling, deep-fried shell'],
+        ['🍷','Sangria','wine mixed with added sugar'],
+        ['🧀','Fried Manchego bites','cheese battered and fried']] },
+    { name:'GERMAN 🥨', go:[
+        ['🥗','Light kartoffelsalat','potato salad with vinegar'],
+        ['🥬','Sauerkraut','fermented cabbage, probiotic'],
+        ['🐟','Grilled fish','lean protein classic'],
+        ['🥖','Rye bread','whole grain fiber']],
+      whoa:[
+        ['🌭','Bratwurst','processed meat, high in fat'],
+        ['🥨','Buttery pretzel','refined dough, salty butter'],
+        ['🍺','Beer','empty calories add up fast'],
+        ['🍰','Black Forest cake','cream, cherries, sugar']] },
+    { name:'POLISH 🥟', go:[
+        ['🥗','Mizeria','cucumber salad, light and fresh'],
+        ['🐟','Grilled fish','lean protein'],
+        ['🍲','Barszcz','beet soup, low-calorie'],
+        ['🥬','Fermented cabbage','gut-friendly probiotics']],
+      whoa:[
+        ['🥟','Fried pierogi','dumplings pan-fried in butter'],
+        ['🍩','Paczki','deep-fried, jam-filled doughnuts'],
+        ['🥓','Kielbasa','fatty processed sausage'],
+        ['🍰','Sernik','rich sweet cheesecake']] },
+    { name:'TURKISH 🧆', go:[
+        ['🧆','Grilled kofte','lean seasoned meat'],
+        ['🥗','Cacik','yogurt and cucumber, cool and light'],
+        ['🍆','Grilled eggplant','fiber-rich veg'],
+        ['🫘','Lentil soup','protein and fiber combo']],
+      whoa:[
+        ['🥐','Simit','a sesame ring, more bread than it looks'],
+        ['🍯','Baklava','honey-soaked filo pastry'],
+        ['🍮','Kunefe','cheese pastry drenched in syrup'],
+        ['☕','Sweet Turkish coffee','sugar stirred right in']] },
+    { name:'LEBANESE 🫓', go:[
+        ['🥙','Grilled chicken shawarma','lean protein'],
+        ['🥗','Tabbouleh','herbs and bulgur, fiber-rich'],
+        ['🫘','Hummus','chickpeas, plant protein'],
+        ['🍆','Baba ganoush','roasted eggplant dip']],
+      whoa:[
+        ['🧀','Fried kibbeh','meat and bulgur, deep-fried shell'],
+        ['🍯','Baklava','syrup-soaked pastry layers'],
+        ['🫓','Extra-oily falafel','oil-soaked chickpea balls'],
+        ['🍮','Sweet muhallabia','milk pudding heavy on sugar']] },
+    { name:'MOROCCAN 🍲', go:[
+        ['🍲','Vegetable tagine','slow-cooked veg, light oil'],
+        ['🥗','Carrot salad','fiber and vitamins'],
+        ['🐟','Grilled fish tagine','lean protein'],
+        ['🫘','Harira soup','lentils and chickpeas']],
+      whoa:[
+        ['🥮','Pastilla','flaky pastry, sugar-dusted'],
+        ['🍯','Chebakia','fried dough soaked in honey'],
+        ['☕','Sweet mint tea','loaded with sugar'],
+        ['🍟','Fried merguez','fatty spiced sausage']] },
+    { name:'CARIBBEAN 🥥', go:[
+        ['🐟','Grilled jerk fish','lean, spiced not fried'],
+        ['🥭','Fresh mango salad','vitamins and fiber'],
+        ['🫘','Rice and peas','fiber-rich plant protein'],
+        ['🥬','Callaloo greens','leafy and iron-rich']],
+      whoa:[
+        ['🍗','Deep-fried jerk chicken','crispy skin, heavy oil'],
+        ['🍞','Fried festival dumplings','fried dough'],
+        ['🍹','Rum punch','sugary and alcoholic'],
+        ['🥧','Coconut sweet bread','sugar and saturated fat']] },
+    { name:'BRAZILIAN 🍖', go:[
+        ['🍖','Grilled picanha','lean cut, simple grilling'],
+        ['🫘','Light feijoada','beans bring protein and fiber'],
+        ['🥗','Salada mista','fresh mixed salad'],
+        ['🍊','Fresh fruit plate','vitamins, natural sugar']],
+      whoa:[
+        ['🧀','Pão de queijo (many)','cheesy fried bread, easy to overeat'],
+        ['🍩','Brigadeiro','condensed milk and chocolate fudge'],
+        ['🍹','Caipirinha','sugar and alcohol mixed'],
+        ['🍟','Fried coxinha','battered, deep-fried chicken']] },
+    { name:'BRITISH 🫖', go:[
+        ['🐟','Grilled fish','lean protein classic'],
+        ['🥗','Garden salad','fresh veg'],
+        ['🍲','Vegetable soup','light and filling'],
+        ['🫘','Low-sugar baked beans','fiber and protein']],
+      whoa:[
+        ['🍟','Fish and chips','battered and deep-fried'],
+        ['🥧','Meat pie','pastry crust, heavy fat'],
+        ['🍰','Sticky toffee pudding','sugar-soaked sponge cake'],
+        ['☕','Full English fry-up','a plate of fried everything']] },
   ];
   const cuisine = CUISINES[Math.floor(mulberry32(seed ^ 0xabc123)() * CUISINES.length)];
   $('cuisineLabel').textContent = cuisine.name;
@@ -342,52 +511,75 @@
 
   // ============ track generation: winds in ALL directions ============
   const STEP = 24, NPTS = 600, START_I = 26, FINISH_I = NPTS - 10;
-  const pts = [], widths = [];
+  let pts = [], widths = [];
   {
-    const r = mulberry32(seed ^ 0x9e3779b9);
-    const grid = new Map();
-    const cell = (x, y) => (Math.round(x / 120)) + ':' + (Math.round(y / 120));
-    let x = 0, y = 0, h = -Math.PI / 2; // north
-    let turn = 0, segLeft = 0, wTarget = 110, w = 120;
-    for (let i = 0; i < NPTS; i++){
-      pts.push([x, y]);
-      widths.push(w);
-      // register cell
-      const key = cell(x, y);
-      if (!grid.has(key)) grid.set(key, i);
-      if (segLeft-- <= 0){
-        segLeft = 10 + Math.floor(r() * 22);
-        const roll = r();
-        const dir = r() < 0.5 ? -1 : 1;
-        turn = roll < 0.30 ? 0 : roll < 0.62 ? dir * 0.035 : roll < 0.88 ? dir * 0.07 : dir * 0.115;
-        {
-          const lane = r();
-          wTarget = lane < 0.22 ? 46 + r() * 12    // 1 lane: tight!
-                  : lane < 0.68 ? 80 + r() * 30    // 2 lanes
-                  : 128 + r() * 24;                // 3 lanes: boulevard
+    // Deterministic retry: generate, MEASURE self-clearance, and if the road
+    // would overlap itself, regenerate with a nudged seed. Same math on every
+    // device → everyone still gets the identical daily stage.
+    function attemptGen(s2){
+      const P = [], W = [];
+      const r = mulberry32(s2);
+      const grid = new Map();
+      const cell = (x, y) => (Math.round(x / 120)) + ':' + (Math.round(y / 120));
+      let x = 0, y = 0, h = -Math.PI / 2; // north
+      let turn = 0, segLeft = 0, wTarget = 110, w = 120;
+      for (let i = 0; i < NPTS; i++){
+        P.push([x, y]);
+        W.push(w);
+        const key = cell(x, y);
+        if (!grid.has(key)) grid.set(key, i);
+        if (segLeft-- <= 0){
+          segLeft = 10 + Math.floor(r() * 22);
+          const roll = r();
+          const dir = r() < 0.5 ? -1 : 1;
+          if (roll < 0.18) turn = 0;
+          else if (roll < 0.40) turn = dir * 0.035;
+          else if (roll < 0.62) turn = dir * 0.075;
+          else if (roll < 0.84) turn = dir * 0.14;   // sharp: lift or brake
+          else { turn = dir * 0.21; segLeft += 10; } // hairpin: you MUST brake
+          {
+            const lane = r();
+            wTarget = lane < 0.22 ? 46 + r() * 12    // 1 lane: tight!
+                    : lane < 0.68 ? 80 + r() * 30    // 2 lanes
+                    : 128 + r() * 24;                // 3 lanes: boulevard
+          }
         }
+        // steer back if drifting into an old part of the track (no crossings)
+        let avoid = 0;
+        for (const look of [220, 400, 600, 820]) for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++){
+          const k = (Math.round((x + Math.cos(h) * look) / 120) + dx) + ':' + (Math.round((y + Math.sin(h) * look) / 120) + dy);
+          const old = grid.get(k);
+          if (old !== undefined && i - old > 35) avoid = 1;
+        }
+        const north = -Math.PI / 2;
+        let dh = turn;
+        if (avoid) dh += (north - h) * 0.62; // bend back toward north to escape
+        h += dh;
+        // clamp heading so the stage always makes progress (can go sideways & slightly down)
+        let rel = h - north;
+        while (rel > Math.PI) rel -= 2 * Math.PI;
+        while (rel < -Math.PI) rel += 2 * Math.PI;
+        rel = Math.max(-2.0, Math.min(2.0, rel));
+        h = north + rel;
+        w += (wTarget - w) * 0.12;
+        x += Math.cos(h) * STEP;
+        y += Math.sin(h) * STEP;
       }
-      // steer back if drifting into an old part of the track (no crossings)
-      let avoid = 0;
-      for (const look of [240, 430, 640]) for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++){
-        const k = (Math.round((x + Math.cos(h) * look) / 120) + dx) + ':' + (Math.round((y + Math.sin(h) * look) / 120) + dy);
-        const old = grid.get(k);
-        if (old !== undefined && i - old > 35) avoid = 1;
+      // measure the tightest gap between non-adjacent road sections
+      let clear = 1e9;
+      for (let i = 0; i < NPTS; i += 4) for (let j = i + 70; j < NPTS; j += 4){
+        const dd = Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1]) - (W[i] + W[j]);
+        if (dd < clear) clear = dd;
       }
-      const north = -Math.PI / 2;
-      let dh = turn;
-      if (avoid) dh += (north - h) * 0.5; // bend back toward north to escape
-      h += dh;
-      // clamp heading so the stage always makes progress (can go sideways & slightly down)
-      let rel = h - north;
-      while (rel > Math.PI) rel -= 2 * Math.PI;
-      while (rel < -Math.PI) rel += 2 * Math.PI;
-      rel = Math.max(-2.0, Math.min(2.0, rel));
-      h = north + rel;
-      w += (wTarget - w) * 0.12;
-      x += Math.cos(h) * STEP;
-      y += Math.sin(h) * STEP;
+      return { P, W, clear };
     }
+    let best = null;
+    for (let a = 0; a < 8; a++){
+      const g = attemptGen((seed ^ 0x9e3779b9) + a * 0x51ab);
+      if (!best || g.clear > best.clear) best = g;
+      if (g.clear >= 12) { best = g; break; }
+    }
+    pts = best.P; widths = best.W;
     // widen & straighten the opening stretch
     for (let i = 0; i < START_I + 8; i++) widths[i] = 135;
   }
@@ -488,27 +680,35 @@
     }
   }
 
-  // the crowd: little cabbages cheering at start, finish and two mid-stage spots
+  // the crowd: fans of all veggie stripes cheering at start, finish, mid-stage, ramps & bridges
+  const FAN_KINDS = [
+    { e: '🥬', c: '#7ddb6a' }, { e: '🍅', c: '#ff5b4d' }, { e: '🥕', c: '#ff8c2e' },
+    { e: '🌽', c: '#ffd23f' }, { e: '🍆', c: '#a06fd6' }, { e: '🫑', c: '#4dbd5c' },
+  ];
   const crowds = [], crowdZones = [];
   {
     const r = mulberry32(seed ^ 0xCAB8A6);
-    function addCrowd(iA, iB){
+    function fan(){ return FAN_KINDS[Math.floor(r() * FAN_KINDS.length)]; }
+    function addCrowd(iA, iB, density){
       for (let i = Math.max(2, iA); i < Math.min(iB, NPTS - 2); i += 2){
         for (const side of [-1, 1]){
-          if (r() < 0.4) continue;
+          if (r() < (density || 0.24)) continue;
           const [px, py] = pts[i], [nx, ny] = normals[i], w = widths[i];
-          const off = side * (w + 22 + r() * 42);
-          crowds.push({ x: px + nx * off, y: py + ny * off, ph: r() * 6.3, s: 7 + r() * 4,
-            c: ['#7ddb6a', '#8fe07a', '#6cc95d', '#a4e88f'][(r() * 4) | 0] });
+          const off = side * (w + 20 + r() * 46);
+          const k = fan();
+          crowds.push({ x: px + nx * off, y: py + ny * off, ph: r() * 6.3, s: 15 + r() * 8, e: k.e, c: k.c });
         }
       }
     }
-    addCrowd(6, 26); crowdZones.push(pts[16]);
-    addCrowd(FINISH_I - 10, FINISH_I + 4); crowdZones.push(pts[FINISH_I - 3]);
-    for (let z = 0; z < 2; z++){
-      const m = Math.floor(START_I + 70 + r() * (FINISH_I - START_I - 150));
-      addCrowd(m, m + 10); crowdZones.push(pts[Math.min(m + 5, NPTS - 1)]);
+    addCrowd(6, 26, 0.12); crowdZones.push(pts[16]);
+    addCrowd(FINISH_I - 12, FINISH_I + 4, 0.1); crowdZones.push(pts[FINISH_I - 3]);
+    for (let z = 0; z < 3; z++){
+      const m = Math.floor(START_I + 50 + r() * (FINISH_I - START_I - 110));
+      addCrowd(m, m + 12, 0.22); crowdZones.push(pts[Math.min(m + 6, NPTS - 1)]);
     }
+    // fans always show up for the fun stuff — ramps and bridges
+    for (const rp of ramps){ addCrowd(rp.i - 6, rp.i + 6, 0.15); crowdZones.push(pts[rp.i]); }
+    for (const [a, b] of bridges){ addCrowd(a - 5, b + 5, 0.2); crowdZones.push(pts[Math.floor((a + b) / 2)]); }
   }
 
   // ============ scenery around the track ============
@@ -551,14 +751,14 @@
     }
   }
 
-  const PAR = { gold: 33, silver: 40, bronze: 52 };
+  const PAR = { gold: 35, silver: 43, bronze: 56 };
   const DNF_AT = 75;
 
   // ============ profile (localStorage) ============
   const FACE_COLORS = ['#ffd23f','#ff8c2e','#7ddb6a','#5bd1ff','#ff7bac','#c9a2ff','#f5f2e8','#ffb35c'];
   const GRID = 18; // paint grid resolution
   const PAINT_COLORS = ['#23331f','#ffffff','#ff3b30','#ff8c2e','#ffd23f','#2fae4e','#5bd1ff','#c9a2ff'];
-  let profile = { name:'', face:{ color:'#ffd23f', paint:'' }, showMine:true, showWorld:true, sound:true, bots:true, streak:{ last:'', count:0 } };
+  let profile = { name:'', face:{ color:'#ffd23f', paint:'' }, showMine:true, showWorld:true, sound:true, music:true, streak:{ last:'', count:0 } };
   try { const p = JSON.parse(localStorage.getItem('pr-profile')); if (p) profile = Object.assign(profile, p); } catch {}
   let myGhosts = []; // [{t,p:[x,y,s,...]}], [0]=PB
   try { const g = JSON.parse(localStorage.getItem('pr-ghosts-' + dateStr)); if (g) myGhosts = g; } catch {}
@@ -585,6 +785,14 @@
     return c;
   }
   // heading: which way the wheels point. The face stays upright; only the chassis turns!
+  function shade(hex, amt){
+    const n = parseInt((hex || '#7ddb6a').replace('#', ''), 16);
+    let r0 = (n >> 16) & 255, g0 = (n >> 8) & 255, b0 = n & 255;
+    if (amt >= 0){ r0 += (255 - r0) * amt; g0 += (255 - g0) * amt; b0 += (255 - b0) * amt; }
+    else { r0 += r0 * amt; g0 += g0 * amt; b0 += b0 * amt; }
+    const cl = v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+    return '#' + cl(r0) + cl(g0) + cl(b0);
+  }
   function drawFace(g, face, r, sz, alpha, heading){
     g.save();
     g.globalAlpha = alpha != null ? alpha : 1;
@@ -600,10 +808,10 @@
     for (const sx of [-1, 1]) for (const sy of [-1, 1]){
       g.beginPath(); g.arc(sx * wx, sy * wy, ww * 0.16, 0, Math.PI * 2); g.fill();
     }
-    // FRONT: bumper + headlights (local -y is forward)
+    // FRONT: bumper + headlights (local -y is forward) — lights tinted from the driver's own color
     g.fillStyle = '#2b2f2a';
     rrect(g, -r * 0.55, -r * 1.12, r * 1.1, r * 0.24, r * 0.1); g.fill();
-    g.fillStyle = '#ffd23f';
+    g.fillStyle = shade(face.color, 0.65);
     g.beginPath(); g.arc(-r * 0.34, -r * 1.0, r * 0.11, 0, Math.PI * 2); g.fill();
     g.beginPath(); g.arc( r * 0.34, -r * 1.0, r * 0.11, 0, Math.PI * 2); g.fill();
     // REAR: spoiler wing on two struts
@@ -611,7 +819,7 @@
     g.fillRect(-r * 0.3, r * 0.82, r * 0.12, r * 0.26);
     g.fillRect( r * 0.18, r * 0.82, r * 0.12, r * 0.26);
     rrect(g, -r * 0.72, r * 1.0, r * 1.44, r * 0.22, r * 0.08); g.fill();
-    g.fillStyle = '#e8433f';
+    g.fillStyle = shade(face.color, -0.42);
     g.fillRect(-r * 0.6, r * 1.03, r * 0.22, r * 0.14);
     g.fillRect( r * 0.38, r * 1.03, r * 0.22, r * 0.14);
     g.restore();
@@ -718,17 +926,13 @@
   renderPreview();
 
   function setTog(el, on){ el.classList.toggle('on', on); }
-  setTog($('togMine'), profile.showMine); setTog($('togWorld'), profile.showWorld); setTog($('togSound'), profile.sound); setTog($('togBots'), profile.bots !== false);
+  setTog($('togMine'), profile.showMine); setTog($('togWorld'), profile.showWorld); setTog($('togSound'), profile.sound); setTog($('togMusic'), profile.music !== false);
   $('togMine').addEventListener('click', () => { profile.showMine = !profile.showMine; setTog($('togMine'), profile.showMine); saveProfile(); });
   $('togWorld').addEventListener('click', () => { profile.showWorld = !profile.showWorld; setTog($('togWorld'), profile.showWorld); saveProfile(); });
   $('togSound').addEventListener('click', () => { profile.sound = !profile.sound; setTog($('togSound'), profile.sound); saveProfile(); });
-  $('togBots').addEventListener('click', () => {
-    profile.bots = profile.bots === false; setTog($('togBots'), profile.bots); saveProfile();
-    if (!profile.bots){
-      bots = [];
-      marshal.queue = marshal.queue.filter(e => e === 'me');
-      if (marshal.pending && marshal.pending !== 'me') marshal.pending = null;
-    } else { worldInit = false; ensureWorld(); }
+  $('togMusic').addEventListener('click', () => {
+    profile.music = profile.music === false; setTog($('togMusic'), profile.music); saveProfile();
+    if (!profile.music) stopMusic(); else if (!racing || !started) startMusic();
   });
   $('muteBtn').addEventListener('click', () => {
     profile.sound = !profile.sound; $('muteBtn').textContent = profile.sound ? '🔊' : '🔇'; saveProfile();
@@ -772,6 +976,11 @@
         others.set(m.id, o);
       }
       if (m.t === 'bye') others.delete(m.id);
+      if (m.t === 'queue'){
+        parkOrder = m.order || []; parkPending = m.pending;
+        if (meQueued && !meReleased) renderRacers();
+      }
+      if (m.t === 'release'){ release(); }
       if (m.t === 'live'){
         $('liveNow').innerHTML = `<span class="dot"></span>${m.racing} racing now`;
         const now = performance.now();
@@ -822,15 +1031,23 @@
     if (!box) return;
     if (!online && !lb.length){ box.innerHTML = '<div class="note">Connecting…</div>'; return; }
     if (!lb.length){ box.innerHTML = '<div class="note">No times yet — set the first one!</div>'; return; }
+    const faceCell = i => `<td class="fc"><canvas class="lbFace" width="40" height="40" data-i="${i}"></canvas></td>`;
     const rows = lb.slice(0, 10).map((e, i) => {
       const me = profile.name && e.n === profile.name;
       const medal = ['🥇','🥈','🥉'][i] || (i + 1) + '.';
-      return `<tr class="${me ? 'me' : ''}"><td>${medal}</td><td>${esc(e.n)}</td><td class="r">${fmt(e.t)}</td></tr>`;
+      return `<tr class="${me ? 'me' : ''}"><td>${medal}</td>${faceCell(i)}<td>${esc(e.n)}</td><td class="r">${fmt(e.t)}</td></tr>`;
     }).join('');
     let mine = '';
     const myIdx = lb.findIndex(e => e.n === profile.name);
-    if (myIdx >= 10) mine = `<tr class="me"><td>${myIdx + 1}.</td><td>${esc(profile.name)}</td><td class="r">${fmt(lb[myIdx].t)}</td></tr>`;
+    if (myIdx >= 10) mine = `<tr class="me"><td>${myIdx + 1}.</td>${faceCell(myIdx)}<td>${esc(profile.name)}</td><td class="r">${fmt(lb[myIdx].t)}</td></tr>`;
     box.innerHTML = `<table class="lb">${rows}${mine}</table>`;
+    box.querySelectorAll('canvas.lbFace').forEach(cv => {
+      const e = lb[+cv.dataset.i];
+      const g2 = cv.getContext('2d');
+      g2.save(); g2.translate(20, 22);
+      drawFace(g2, (e && e.f) || { color: '#7ddb6a', paint: '' }, 12, 0, 1, -Math.PI / 2);
+      g2.restore();
+    });
   }
   function esc(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
   function fmt(ms){ return (ms / 1000).toFixed(2) + 's'; }
@@ -898,6 +1115,59 @@
   const resumeAudio = () => { try { if (audio) audio.resume(); if (racing && !engOsc) startEngine(); if (racing && !crowdSrc) startCrowd(); } catch {} };
   window.addEventListener('touchstart', resumeAudio, { passive: true });
   window.addEventListener('pointerdown', resumeAudio, { passive: true });
+
+  // ---- service-park radio: gentle public-domain classical melodies ----
+  // These are centuries-old compositions (public domain), synthesized fresh
+  // here as simple sequenced notes — no copyrighted recordings involved.
+  const midiFreq = n => 440 * Math.pow(2, (n - 69) / 12);
+  const MELODIES = [
+    { name: "Beethoven — Für Elise (opening)", tempo: 116, notes: [
+      [76,.5],[75,.5],[76,.5],[75,.5],[76,.5],[71,.5],[74,.5],[72,.5],[69,1],
+      [60,.5],[64,.5],[69,.5],[71,1],
+      [64,.5],[68,.5],[71,.5],[72,1.5],
+    ]},
+    { name: "Beethoven — Ode to Joy", tempo: 108, notes: [
+      [64,.5],[64,.5],[65,.5],[67,.5],[67,.5],[65,.5],[64,.5],[62,.5],
+      [60,.5],[60,.5],[62,.5],[64,.5],[64,.75],[62,.25],[62,1.5],
+    ]},
+    { name: "Minuet in G (Bach-style, original arrangement)", tempo: 100, notes: [
+      [67,.5],[71,.5],[74,.5],[72,.5],[71,.5],[69,.5],[67,1],
+      [69,.5],[71,.5],[72,.5],[74,.5],[76,.5],[74,.5],[72,1],
+      [67,.5],[69,.5],[71,.5],[67,.5],[64,.5],[62,.5],[60,1.5],
+    ]},
+  ];
+  let musicTimer = null, musicGain = null, musicPlaying = false;
+  function playNote(freq, startAt, dur, gainNode){
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = 'triangle'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, startAt);
+    g.gain.linearRampToValueAtTime(0.16, startAt + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, startAt + dur * 0.92);
+    o.connect(g); g.connect(gainNode);
+    o.start(startAt); o.stop(startAt + dur);
+  }
+  function scheduleMelody(track){
+    if (!musicPlaying) return;
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    if (!musicGain){ musicGain = audio.createGain(); musicGain.gain.value = 0.5; musicGain.connect(audio.destination); }
+    const beat = 60 / track.tempo;
+    let t = audio.currentTime + 0.05;
+    for (const [n, d] of track.notes){ playNote(midiFreq(n), t, d * beat * 0.95, musicGain); t += d * beat; }
+    musicTimer = setTimeout(() => {
+      if (musicPlaying) scheduleMelody(MELODIES[(MELODIES.indexOf(track) + 1) % MELODIES.length]);
+    }, (t - audio.currentTime) * 1000);
+  }
+  function startMusic(){
+    if (!profile.music || musicPlaying) return;
+    musicPlaying = true;
+    scheduleMelody(MELODIES[Math.floor(Math.random() * MELODIES.length)]);
+  }
+  function stopMusic(){
+    musicPlaying = false;
+    clearTimeout(musicTimer);
+    if (musicGain){ try { musicGain.disconnect(); } catch {} musicGain = null; }
+  }
+
   function blip(freq, dur, type){
     if (!profile.sound) return;
     try {
@@ -954,33 +1224,17 @@
   }
   function mmPoint(x, y){ return [x*mmScale+mmOx, y*mmScale+mmOy]; }
 
-  // ============ world bots + the service-park start queue ============
-  // Rally rules: everyone queues in the service park. The marshal releases the
-  // next car 3 seconds after the previous one crosses the start line.
-  const BOT_DEFS = [
-    ['BROCCOLI BOB', '#7ddb6a'],
-    ['CAPTAIN CARROT', '#ff8c2e'],
-    ['MISS MANGO', '#ffd23f'],
-    ['TURBO TOFU', '#f5f2e8'],
-    ['CHILI CHARLIE', '#ff7bac'],
-  ];
-  let bots = [], worldInit = false, worldT = 0, meJoinT = 0;
-  const marshal = { queue: [], lastCrossT: -999, pending: null };
-  let meQueued = false, meReleased = false;
+  // ============ the service-park start queue — real players only ============
+  // Rally rules: everyone queues in the service park. The marshal (the server,
+  // shared by every connected driver) releases the next car 3 seconds after
+  // the previous one crosses the start line. Offline/solo play gets a small
+  // local fallback so you're never stuck waiting for a marshal that isn't there.
+  let meQueued = false, meReleased = false, meJoinT = 0;
+  let parkOrder = [], parkPending = null; // ids, from the server's queue snapshot
 
-  function makeBotPaint(rr){
-    const c = 1 + Math.floor(rr() * PAINT_COLORS.length);
-    const pat = Math.floor(rr() * 3);
-    let p = '';
-    for (let i = 0; i < GRID * GRID; i++){
-      const x = i % GRID, y = (i / GRID) | 0;
-      let hit = false;
-      if (pat === 0) hit = (y === 5 || y === 11);
-      else if (pat === 1) hit = (x + y) % 6 === 0;
-      else hit = ((x - 9) * (x - 9) + (y - 9) * (y - 9)) < 15;
-      p += hit ? String(c) : '0';
-    }
-    return p;
+  function trackDir(i){
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(NPTS - 1, i + 1)];
+    return Math.atan2(b[1] - a[1], b[0] - a[0]);
   }
   function parkSlot(k){
     const i = 5;
@@ -990,157 +1244,32 @@
     return [
       px + nx * -(widths[i] + 62) - (dxv / L) * (k * 46),
       py + ny * -(widths[i] + 62) - (dyv / L) * (k * 46),
-      -Math.PI / 2,
+      trackDir(6),
     ];
   }
-  function spawnBots(){
-    const rr = mulberry32((Math.random() * 1e9) | 0);
-    bots = BOT_DEFS.map(([n, col], k) => ({
-      n, face: { color: col, paint: makeBotPaint(rr) },
-      x: 0, y: 0, angle: -Math.PI / 2, speed: 0, idx: 3,
-      base: 305 + k * 26, wob: rr() * 10, done: false,
-      size: 0, boostT: 0, slowT: 0, inv: 0, coolT: 0, eatCd: 0,
-      iq: 0.3 + rr() * 0.7,
-      state: 'queue', crossed: false, joinT: 0,
-    }));
-    for (const b of bots){ b.joinT = worldT; marshal.queue.push(b); }
+  function joinQueue(){
+    meQueued = true; meReleased = false; meJoinT = performance.now();
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'queue_join' }));
   }
-  function ensureWorld(){
-    if (!worldInit && profile.bots !== false){ spawnBots(); worldInit = true; }
+  function leaveQueue(){
+    meQueued = false; meReleased = false;
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'queue_leave' }));
   }
-  function marshalJoinMe(){
-    marshal.queue = marshal.queue.filter(e => e !== 'me');
-    if (marshal.pending === 'me') marshal.pending = null;
-    meQueued = true; meReleased = false;
-    meJoinT = worldT;
-    marshal.queue.push('me');
+  function release(){
+    meReleased = true;
+    $('rollHint').textContent = '🟢 GO! FOLLOW THE PIT LANE ➜ START LINE';
+    blip(700, 0.12); blip(980, 0.16);
+  }
+  // offline / solo fallback: if no marshal message arrives in time, self-release
+  function checkSoloFallback(now){
+    if (meQueued && !meReleased && (!online || !myId) && now - meJoinT > 1400) release();
   }
 
-  function updateWorld(dt, now){
-    worldT += dt;
-    // marshal releases the head of the queue (everyone parks at least a moment)
-    if (!marshal.pending && marshal.queue.length && worldT - marshal.lastCrossT >= 3
-        && (marshal.queue[0] === 'me' ? worldT - meJoinT >= 0.9 : worldT - (marshal.queue[0].joinT || 0) >= 0.9)){
-      const e = marshal.queue.shift();
-      if (e === 'me'){
-        if (racing && meQueued){
-          marshal.pending = 'me';
-          meReleased = true;
-          $('rollHint').textContent = '🟢 GO! FOLLOW THE PIT LANE ➜ START LINE';
-          blip(700, 0.12); blip(980, 0.16);
-        }
-      } else {
-        marshal.pending = e;
-        e.state = 'racing'; e.crossed = false;
-        const [sx, sy, sa] = parkSlot(0);
-        e.x = sx; e.y = sy; e.angle = sa; e.speed = 0; e.idx = 3;
-      }
-    }
-    // park the queued cars in their slots
-    let slot = marshal.pending && marshal.pending !== 'me' ? 1 : (marshal.pending === 'me' ? 1 : 0);
-    for (const e of marshal.queue){
-      if (e === 'me'){ slot++; continue; } // player pinned in update()
-      const [sx, sy, sa] = parkSlot(slot++);
-      e.x = sx; e.y = sy; e.angle = sa; e.speed = 0;
-    }
-    // racing / cooling bots
-    for (const b of bots){
-      if (b.state === 'cool'){
-        b.coolT -= dt;
-        if (b.coolT <= 0){ b.state = 'queue'; b.size = 0; b.speed = 0; b.crossed = false; b.joinT = worldT; marshal.queue.push(b); }
-        continue;
-      }
-      if (b.state !== 'racing') continue;
-      const ahead = Math.min(b.idx + 12, NPTS - 1);
-      const lane = Math.sin(now * 0.001 + b.wob) * widths[ahead] * 0.45;
-      let aimX = null, aimY = null;
-      for (const f of foods){
-        if (f.eaten) continue;
-        const dxf = f.x - b.x, dyf = f.y - b.y;
-        const d2 = dxf * dxf + dyf * dyf;
-        if (d2 > 260 * 260) continue;
-        const forward = dxf * Math.cos(b.angle) + dyf * Math.sin(b.angle);
-        if (forward < 20) continue;
-        if (f.go && b.iq > 0.4){ aimX = f.x; aimY = f.y; break; }
-        if (!f.go && b.iq > 0.55 && d2 < 120 * 120){
-          const [nx2, ny2] = normals[b.idx];
-          const side = ((b.x - f.x) * nx2 + (b.y - f.y) * ny2) >= 0 ? 1 : -1;
-          aimX = f.x + nx2 * side * 75;
-          aimY = f.y + ny2 * side * 75;
-          break;
-        }
-      }
-      if (aimX === null) for (const st of stones){
-        const dxs = st.x - b.x, dys = st.y - b.y;
-        const d2s = dxs * dxs + dys * dys;
-        if (d2s > 130 * 130) continue;
-        const fwd = dxs * Math.cos(b.angle) + dys * Math.sin(b.angle);
-        if (fwd < 15) continue;
-        if (b.iq > 0.4){
-          const [nx2, ny2] = normals[b.idx];
-          const side = ((b.x - st.x) * nx2 + (b.y - st.y) * ny2) >= 0 ? 1 : -1;
-          aimX = st.x + nx2 * side * 70;
-          aimY = st.y + ny2 * side * 70;
-        }
-        break;
-      }
-      if (aimX === null){
-        aimX = pts[ahead][0] + normals[ahead][0] * lane;
-        aimY = pts[ahead][1] + normals[ahead][1] * lane;
-      }
-      const want = Math.atan2(aimY - b.y, aimX - b.x);
-      let dA = want - b.angle;
-      while (dA > Math.PI) dA -= 2 * Math.PI;
-      while (dA < -Math.PI) dA += 2 * Math.PI;
-      const tr = 3.2 / (1 + b.size * 0.22);
-      b.angle += Math.max(-tr * dt, Math.min(tr * dt, dA));
-      let max = b.base * (0.94 + 0.1 * Math.sin(now * 0.0007 + b.wob * 3)) * (1 - b.size * 0.045);
-      if (b.boostT > 0){ max *= 1.5; b.boostT -= dt; }
-      if (b.slowT > 0){ max *= 0.3; b.slowT -= dt; }
-      b.speed += (max - b.speed) * Math.min(dt * 1.7, 1);
-      b.x += Math.cos(b.angle) * b.speed * dt;
-      b.y += Math.sin(b.angle) * b.speed * dt;
-      // bots react to food (grow / shrink / boost) but never consume it —
-      // stage items are identical for every racer and every run
-      const br2 = BASE_R + b.size * 5;
-      if (b.eatCd > 0) b.eatCd -= dt;
-      else for (const f of foods){
-        if (f.eaten) continue;
-        const dxf = f.x - b.x, dyf = f.y - b.y;
-        if (dxf * dxf + dyf * dyf < (br2 + 14) * (br2 + 14)){
-          b.eatCd = 0.6;
-          if (f.go){ b.size = Math.max(0, b.size - 1); b.boostT = 1.0; burst(f.x, f.y, '#2fae4e', 6); }
-          else { b.size = Math.min(4, b.size + 1); b.slowT = 0.4; burst(f.x, f.y, '#ff8c2e', 6); }
-          break;
-        }
-      }
-      if (b.inv > 0) b.inv -= dt;
-      else for (const st of stones){
-        const dxs = st.x - b.x, dys = st.y - b.y;
-        if (dxs * dxs + dys * dys < (br2 + st.s) * (br2 + st.s)){
-          b.speed *= 0.2; b.slowT = 0.5; b.inv = 1;
-          burst(st.x, st.y, '#8a938a', 8);
-          break;
-        }
-      }
-      let bb = 1e18, bi2 = b.idx;
-      for (let i = Math.max(0, b.idx - 10); i < Math.min(NPTS, b.idx + 40); i++){
-        const dx = pts[i][0] - b.x, dy = pts[i][1] - b.y, d = dx * dx + dy * dy;
-        if (d < bb){ bb = d; bi2 = i; }
-      }
-      b.idx = bi2;
-      if (!b.crossed && b.idx >= START_I){
-        b.crossed = true;
-        marshal.lastCrossT = worldT;
-        if (marshal.pending === b) marshal.pending = null;
-      }
-      if (b.idx >= FINISH_I){
-        b.state = 'cool'; b.coolT = 2.5;
-        tickEvent('🤖 ' + b.n + ' finished — back to the park!');
-      }
-    }
+  function myQueuePosition(){
+    const i = parkOrder.indexOf(myId);
+    if (i < 0) return 0;
+    return i + (parkPending && parkPending !== myId ? 1 : 0);
   }
-
   function coarseIdx(x, y){
     let best = 1e18, bi = 0;
     for (let i = 0; i < NPTS; i += 8){
@@ -1150,19 +1279,26 @@
     return bi;
   }
   function renderRacers(){
-    const rows = [{ n: profile.name, idx, me: true }];
-    for (const b of bots) if (b.state === 'racing') rows.push({ n: b.n, idx: b.idx, bot: true });
     const nowP = performance.now();
+    const racingRows = [{ n: profile.name, idx, me: true }];
     for (const o of others.values()){
       if (o.tx === undefined || nowP - (o.seen || 0) > 2500) continue;
-      rows.push({ n: o.n, idx: coarseIdx(o.x, o.y) });
+      racingRows.push({ n: o.n, idx: coarseIdx(o.x, o.y) });
     }
-    rows.sort((a, b) => b.idx - a.idx);
-    let h = '<div class="rhead">ON TRACK: ' + rows.length + '</div>';
-    rows.slice(0, 8).forEach((r0, i) => {
-      h += '<div class="rrow' + (r0.me ? ' meRow' : '') + '">' + (i + 1) + '. ' + (r0.bot ? '🤖 ' : '') + esc(r0.n || '') + '</div>';
+    racingRows.sort((a, b) => b.idx - a.idx);
+    let h = '<div class="rhead">ON TRACK: ' + racingRows.length + '</div>';
+    racingRows.slice(0, 8).forEach((r0, i) => {
+      h += '<div class="rrow' + (r0.me ? ' meRow' : '') + '">' + (i + 1) + '. ' + esc(r0.n || '') + '</div>';
     });
-    if (rows.length > 8) h += '<div class="rrow">… +' + (rows.length - 8) + ' more</div>';
+    if (racingRows.length > 8) h += '<div class="rrow">… +' + (racingRows.length - 8) + ' more</div>';
+    const waiting = parkOrder.filter(id => id !== myId).length + (meQueued && !meReleased ? 1 : 0);
+    if (waiting > 0){
+      h += '<div class="rhead" style="margin-top:8px">IN QUEUE: ' + waiting + '</div>';
+      const names = [];
+      if (meQueued && !meReleased) names.push(profile.name + ' (you)');
+      for (const id of parkOrder){ if (id === myId) continue; const o = others.get(id); if (o) names.push(o.n || '???'); }
+      names.slice(0, 6).forEach(n0 => { h += '<div class="rrow">🅿 ' + esc(n0) + '</div>'; });
+    }
     $('racersPanel').innerHTML = h;
   }
 
@@ -1170,7 +1306,7 @@
   const BASE_R = 15, MAX_SPD = 430;
   let me = null, racing = false, started = false, raceT = 0, idx = 0, runT = 0, listAcc = 0, skids = [];
   let camX = 0, camY = 0, particles = [], recorded = [], recAcc = 0, posAcc = 0;
-  let activeGhosts = [], cpDone = [], ateGo = 0, ateWhoa = 0, maxSize = 0, wobbleT = 0;
+  let activeGhosts = [], cpDone = [], ateGo = 0, ateWhoa = 0, maxSize = 0, wobbleT = 0, eatenList = [];
   const CPS = [0.25, 0.5, 0.75].map(f => Math.floor(START_I + (FINISH_I - START_I) * f));
   const decCache = {};
   let lastRank = 0, lastTimeMs = 0, lastMedal = '';
@@ -1183,6 +1319,19 @@
     beginRun();
   }
   $('restartBtn').addEventListener('click', restartRun);
+  function goToMenu(){
+    if (!racing) return;
+    racing = false; started = false;
+    stopEngine(); stopCrowd();
+    leaveQueue();
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'run_end' }));
+    ['hud','controls','minimap','muteBtn','restartBtn','homeBtn','rollHint','racersPanel'].forEach(id => $(id).classList.add('hidden'));
+    $('delta').classList.remove('show');
+    renderLb($('lbBox'));
+    startMusic();
+    $('menu').classList.remove('hidden');
+  }
+  $('homeBtn').addEventListener('click', goToMenu);
   window.addEventListener('keydown', e => { if ((e.key === 'r' || e.key === 'R') && racing) restartRun(); });
   $('retryBtn').addEventListener('click', () => { $('finish').classList.add('hidden'); beginRun(); });
   window.addEventListener('keydown', e => {
@@ -1201,15 +1350,13 @@
     idx = 4; camX = me.x; camY = me.y;
     racing = true; started = false; raceT = 0; runT = 0; listAcc = 0;
     particles = []; recorded = []; recAcc = 0; posAcc = 0;
-    cpDone = [false, false, false]; ateGo = 0; ateWhoa = 0; maxSize = 0;
+    cpDone = [false, false, false]; ateGo = 0; ateWhoa = 0; maxSize = 0; eatenList = [];
     for (const f of foods) f.eaten = false;
     for (const wp of waters) wp.taken = false;
     skids = [];
-    ensureWorld();
-    marshalJoinMe();
-    { // spawn parked in your queue slot
-      const qi = marshal.queue.indexOf('me');
-      const [sx, sy, sa] = parkSlot(qi + (marshal.pending ? 1 : 0));
+    joinQueue();
+    { // spawn parked in your queue slot (position updates live as others join/leave)
+      const [sx, sy, sa] = parkSlot(myQueuePosition());
       me.x = sx; me.y = sy; me.angle = sa;
     }
     for (const k of Object.keys(decCache)) delete decCache[k];
@@ -1229,6 +1376,7 @@
     $('minimap').classList.remove('hidden');
     $('muteBtn').classList.remove('hidden');
     $('restartBtn').classList.remove('hidden');
+    $('homeBtn').classList.remove('hidden');
     $('racersPanel').classList.remove('hidden');
     renderRacers();
     $('muteBtn').textContent = profile.sound ? '🔊' : '🔇';
@@ -1241,9 +1389,9 @@
 
   function crossStart(){
     started = true; raceT = 0;
-    marshal.lastCrossT = worldT;
-    if (marshal.pending === 'me') marshal.pending = null;
     meQueued = false;
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'crossed' }));
+    stopMusic();
     $('rollHint').classList.add('hidden');
     blip(660, 0.15); blip(880, 0.2);
   }
@@ -1251,12 +1399,14 @@
   function eat(f){
     if (!f.go && me.shieldT > 0){
       f.eaten = true;
+      eatenList.push({ def: f.def, go: false, blocked: true });
       burst(f.x, f.y, '#5bd1ff', 10);
       blip(640, 0.1);
       foodToast('🛡 Shield! ' + f.def[0] + ' ' + f.def[1] + ' — blocked', false);
       return;
     }
     f.eaten = true;
+    eatenList.push({ def: f.def, go: f.go });
     const [emoji, name, fact] = f.def;
     if (f.go){
       ateGo++;
@@ -1315,12 +1465,13 @@
     racing = false;
     stopEngine();
     stopCrowd();
+    startMusic();
     if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'run_end' }));
     const timeMs = dnf ? DNF_AT * 1000 : Math.round(raceT * 1000);
     lastTimeMs = timeMs;
     const sec = timeMs / 1000;
     lastMedal = dnf ? '' : sec <= PAR.gold ? '🥇' : sec <= PAR.silver ? '🥈' : sec <= PAR.bronze ? '🥉' : '';
-    ['hud','controls','minimap','muteBtn','restartBtn','rollHint','racersPanel'].forEach(id => $(id).classList.add('hidden'));
+    ['hud','controls','minimap','muteBtn','restartBtn','homeBtn','rollHint','racersPanel'].forEach(id => $(id).classList.add('hidden'));
     $('delta').classList.remove('show');
 
     $('finStage').textContent = cuisine.name + ' · SS #' + stageNo;
@@ -1328,6 +1479,21 @@
     $('finTime').textContent = dnf ? 'DNF' : fmt(timeMs);
     $('ateH').textContent = '🥗 ' + ateGo + ' GO foods';
     $('ateJ').textContent = '🍟 ' + ateWhoa + ' WHOA foods';
+    { // the full menu you ate — know your fuel!
+      const groups = new Map();
+      for (const it of eatenList){
+        const key = it.def[0] + it.def[1] + (it.blocked ? 'B' : '');
+        const g0 = groups.get(key) || { def: it.def, go: it.go, blocked: !!it.blocked, count: 0 };
+        g0.count++; groups.set(key, g0);
+      }
+      $('finEaten').innerHTML = groups.size
+        ? [...groups.values()].map(g0 =>
+            '<div class="eRow ' + (g0.blocked ? 'b' : g0.go ? 'g' : 'j') + '">'
+            + '<span class="eIco">' + g0.def[0] + '</span>'
+            + '<span class="eName">' + esc(g0.def[1]) + (g0.count > 1 ? ' ×' + g0.count : '') + (g0.blocked ? ' 🛡' : '') + '</span>'
+            + '<span class="eFact">' + esc(g0.def[2]) + '</span></div>').join('')
+        : '<div class="eRow g"><span class="eIco">🧘</span><span class="eName">Clean run</span><span class="eFact">not a single bite — pure focus</span></div>';
+    }
     const tips = [
       'Fill half your plate with fruit & veg — the base of the pyramid!',
       'GO foods are everyday foods. WHOA foods are once-in-a-while treats.',
@@ -1422,9 +1588,9 @@
     }
     // waiting in the service park: parked until the marshal waves you off
     if (meQueued && !meReleased){
-      const qi = marshal.queue.indexOf('me');
-      const ahead = (qi < 0 ? 0 : qi) + (marshal.pending && marshal.pending !== 'me' ? 1 : 0);
-      const [sx, sy, sa] = parkSlot(ahead + (marshal.pending === 'me' ? 1 : 0));
+      checkSoloFallback(now);
+      const ahead = myQueuePosition();
+      const [sx, sy, sa] = parkSlot(ahead);
       me.x = sx; me.y = sy; me.angle = sa;
       me.vx = 0; me.vy = 0; me.speed = 0;
       $('rollHint').textContent = ahead > 0 ? ('🅿 SERVICE PARK — ' + ahead + ' AHEAD OF YOU') : "🅿 YOU'RE NEXT — WAIT FOR THE MARSHAL…";
@@ -1478,6 +1644,7 @@
     if (me.z === 0 && dist > widths[idx] + 110){
       burst(me.x, me.y, '#b9cfa1', 16);
       me.x = pts[idx][0]; me.y = pts[idx][1];
+      me.angle = trackDir(idx); me.vx = 0; me.vy = 0;
       me.speed = 0; me.slowT = 0.4; me.stunT = 0.5;
       blip(220, 0.25, 'square');
       foodToast('🚧 OFF COURSE — back on the track!', true);
@@ -1486,6 +1653,7 @@
     if (me.z === 0 && !onRoad && onBridge(idx)){
       burst(me.x, me.y, '#5bd1ff', 22);
       me.x = pts[idx][0]; me.y = pts[idx][1];
+      me.angle = trackDir(idx); me.vx = 0; me.vy = 0;
       me.speed = 0; me.slowT = 0.4; me.stunT = 1.0;
       blip(180, 0.3, 'square');
       foodToast('💦 SPLASH! +1s penalty', true);
@@ -1727,16 +1895,16 @@
       ctx.font = d.s + 'px sans-serif';
       ctx.fillText(d.e, d.x, d.y);
     }
-    // the cabbage crowd goes wild
+    // the veggie crowd goes wild
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const cb of crowds){
       const cx2 = cb.x - camX, cy2 = cb.y - camY;
       if (Math.abs(cx2) > W/2 + 30 || Math.abs(cy2) > H/2 + 30) continue;
-      const bob = Math.sin(now * 0.006 + cb.ph) * 2.2;
-      ctx.fillStyle = cb.c;
-      ctx.beginPath(); ctx.arc(cb.x, cb.y + bob, cb.s, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = 'rgba(28,122,53,.55)'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(cb.x, cb.y + bob, cb.s, 0, Math.PI * 2); ctx.stroke();
-      ctx.beginPath(); ctx.arc(cb.x - cb.s * 0.25, cb.y + bob - cb.s * 0.15, cb.s * 0.5, Math.PI * 0.9, Math.PI * 1.9); ctx.stroke();
+      const bob = Math.sin(now * 0.007 + cb.ph) * 3;
+      ctx.save(); ctx.translate(cb.x, cb.y + bob); ctx.rotate(Math.sin(now * 0.004 + cb.ph) * 0.12);
+      ctx.font = cb.s + 'px sans-serif';
+      ctx.fillText(cb.e, 0, 0);
+      ctx.restore();
     }
 
     // jump ramps
@@ -1846,23 +2014,25 @@
       ctx.fillText(o.n || '', o.x, o.y - (BASE_R + (o.sz||0)*5) - 9);
     }
 
-    // bots (parked in the service area or out on the stage)
-    for (const b of bots){
-      if (b.state === 'cool') continue;
-      const bdx = b.x - camX, bdy = b.y - camY;
-      if (Math.abs(bdx) > W/2 + 60 || Math.abs(bdy) > H/2 + 60) continue;
-      const rb = BASE_R + b.size * 5;
-      ctx.save(); ctx.translate(b.x, b.y);
-      if (b.boostT > 0){
-        ctx.strokeStyle = 'rgba(47,174,78,.5)'; ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.arc(0, 0, rb + 6, 0, Math.PI * 2); ctx.stroke();
+    // other real players waiting in the service park
+    {
+      let slot = parkPending ? 1 : 0; // slot 0 stays clear for whoever was just released
+      for (const id of parkOrder){
+        if (id === myId) { slot++; continue; }
+        const o = others.get(id);
+        const [px, py, pa] = parkSlot(slot);
+        slot++;
+        if (!o) continue;
+        const pdx = px - camX, pdy = py - camY;
+        if (Math.abs(pdx) > W/2 + 60 || Math.abs(pdy) > H/2 + 60) continue;
+        ctx.save(); ctx.translate(px, py);
+        drawFace(ctx, o.face || { color: '#7ddb6a', paint: '' }, BASE_R, 0, 0.85, pa);
+        ctx.restore();
+        ctx.font = '700 11px Rubik, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(35,51,31,.6)';
+        ctx.fillText('🅿 ' + (o.n || ''), px, py - BASE_R - 9);
       }
-      drawFace(ctx, b.face, rb, b.size, 0.92, b.angle);
-      ctx.restore();
-      ctx.font = '700 11px Rubik, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillStyle = 'rgba(35,51,31,.6)';
-      ctx.fillText('🤖 ' + b.n, b.x, b.y - rb - 9);
     }
 
     // me (lifts off the ground when jumping)
@@ -1908,12 +2078,6 @@
       mg.fillStyle = '#2fae4e';
       mg.beginPath(); mg.arc(px, py, 4, 0, Math.PI*2); mg.fill();
     }
-    mg.fillStyle = '#8fb37a';
-    for (const b of bots){
-      if (b.state !== 'racing') continue;
-      const [bx, by] = mmPoint(b.x, b.y);
-      mg.beginPath(); mg.arc(bx, by, 3.5, 0, Math.PI * 2); mg.fill();
-    }
     const [mx, my] = mmPoint(me.x, me.y);
     mg.fillStyle = '#ff8c2e';
     mg.beginPath(); mg.arc(mx, my, 6, 0, Math.PI*2); mg.fill();
@@ -1937,12 +2101,12 @@
   function loop(now){
     const dt = Math.min((now - lastT) / 1000, 0.05);
     lastT = now;
-    updateWorld(dt, now);
     if (racing) update(dt, now);
     render(now);
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
+  startMusic();
 })();
 </script>
 </body>
