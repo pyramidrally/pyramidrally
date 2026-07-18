@@ -639,6 +639,28 @@
     return [-dy / L, dx / L];
   });
 
+  // Edge-tick validity. The road border is an offset curve, and on a tight
+  // hairpin the inner offset folds back INSIDE the asphalt (turn radius <
+  // half-width). Precompute once: drop any tick that lands on the road.
+  const tickOK = [];
+  for (let i = 0; i < NPTS; i++){
+    const [nx, ny] = normals[i], w = widths[i];
+    const pair = [];
+    const lo = Math.max(0, i - 80), hi = Math.min(NPTS, i + 81); // folds are local
+    for (const s of [-1, 1]){
+      const tx = pts[i][0] + nx * w * s, ty = pts[i][1] + ny * w * s;
+      let ok = true;
+      for (let j = lo; j < hi; j++){
+        if (Math.abs(j - i) <= 3) continue; // its own stretch of road
+        const dx = pts[j][0] - tx, dy = pts[j][1] - ty;
+        const lim = widths[j] - 1;
+        if (dx * dx + dy * dy < lim * lim){ ok = false; break; }
+      }
+      pair.push(ok);
+    }
+    tickOK.push(pair);
+  }
+
   // ============ foods (seeded, themed) ============
   const foods = []; // {x,y,def:[emoji,name,fact],go:bool,eaten}
   {
@@ -1905,7 +1927,9 @@
     for (let i = lo; i < hi; i += 2){
       const [nx, ny] = normals[i], w = widths[i];
       ctx.fillStyle = onBridge(i) ? '#7a5c3a' : (i % 4 === 0) ? '#ff8c2e' : '#2fae4e';
-      for (const s of [-1, 1]){
+      for (let k = 0; k < 2; k++){
+        if (!tickOK[i][k]) continue; // folded inside the road on a hairpin
+        const s = k === 0 ? -1 : 1;
         ctx.beginPath();
         ctx.arc(pts[i][0] + nx * w * s, pts[i][1] + ny * w * s, 5, 0, Math.PI * 2);
         ctx.fill();
