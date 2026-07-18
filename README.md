@@ -1,4 +1,4 @@
-# 🍏 PYRAMID RALLY
+# 🍏 FOOD PYRAMID RALLY
 
 A daily rally stage where the healthy food pyramid fights back. Everyone in the
 world races the same procedurally generated stage each day — eat GO foods to

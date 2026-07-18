@@ -1,4 +1,4 @@
-/*  PYRAMID RALLY — live server
+/*  FOOD PYRAMID RALLY — live server
     Everyone races the same daily stage on their own device.
     The server: broadcasts live racer positions, runs the shared service-park
     start queue, keeps the global daily leaderboard, awards monthly
@@ -507,7 +507,7 @@ setInterval(() => {
 
 server.listen(PORT, () => {
   console.log('');
-  console.log('  🍏 PYRAMID RALLY server running!');
+  console.log('  🍏 FOOD PYRAMID RALLY server running!');
   console.log(`  Play at:  http://localhost:${PORT}`);
   console.log(`  Leaderboard storage: ${storageMode === 'file' ? 'local file (resets on redeploy — see README)' : storageMode + ' (persistent)'}`);
   console.log(`  Accounts: ${auth.enabled() ? 'Google Sign-In enabled' : 'disabled (set GOOGLE_CLIENT_ID to enable)'}`);

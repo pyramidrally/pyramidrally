@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>PYRAMID RALLY — the daily food stage</title>
+<title>FOOD PYRAMID RALLY — the daily food stage</title>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Archivo+Black&family=Rubik:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
   :root{ --green:#2fae4e; --dgreen:#1c7a35; --orange:#ff8c2e; --cream:#faf7f0; --ink:#23331f; --soft:#e8f2dd; }
@@ -118,7 +118,7 @@
   .checker{width:100%;max-width:420px;height:10px;margin-bottom:22px;
     background:repeating-linear-gradient(90deg,#23331f 0 10px,#f5f2e8 10px 20px);border-radius:3px;opacity:.85}
   .eyebrow{font-size:11px;letter-spacing:4px;text-transform:uppercase;color:#9aa88e;font-weight:700}
-  h1.logo{font-family:'Archivo Black',sans-serif;font-size:clamp(34px,9vw,56px);color:var(--dgreen);
+  h1.logo{font-family:'Archivo Black',sans-serif;font-size:clamp(26px,7.2vw,44px);color:var(--dgreen);
     text-transform:lowercase;letter-spacing:-1px;line-height:1;margin:6px 0 20px;text-shadow:none}
   h1.logo::after{content:"";display:block;width:64px;height:5px;background:var(--orange);margin:12px auto 0;border-radius:3px}
   .stageCard,.card{width:min(400px,92vw);background:#fff;border:1px solid #dfe8d2;border-radius:14px;
@@ -209,7 +209,7 @@
 <div class="overlay v2" id="menu">
   <div class="checker"></div>
   <div class="eyebrow">the daily food stage</div>
-  <h1 class="logo">pyramid rally</h1>
+  <h1 class="logo">food pyramid rally</h1>
 
   <div class="card" id="authBox" style="display:none">
     <div class="cardHead">account</div>
@@ -1778,7 +1778,7 @@
   $('shareBtn').addEventListener('click', async () => {
     const rankTxt = lastRank ? ` · #${lastRank}` : '';
     const streakTxt = profile.streak.count > 1 ? `\n🔥 ${profile.streak.count}-day streak` : '';
-    const text = `🍏 PYRAMID RALLY · SS #${stageNo} — ${cuisine.name}\n⏱ ${fmt(lastTimeMs)} ${lastMedal}${rankTxt}\n🥗 ate ${ateGo} · 🍟 dodged ${foods.filter(f=>!f.go).length - ateWhoa}${streakTxt}`;
+    const text = `🍏 FOOD PYRAMID RALLY · SS #${stageNo} — ${cuisine.name}\n⏱ ${fmt(lastTimeMs)} ${lastMedal}${rankTxt}\n🥗 ate ${ateGo} · 🍟 dodged ${foods.filter(f=>!f.go).length - ateWhoa}${streakTxt}`;
     try { await navigator.clipboard.writeText(text); toast('Copied to clipboard!'); }
     catch { toast(text); }
   });
