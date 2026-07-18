@@ -850,28 +850,43 @@
       }
       return true;
     }
+    // clearOfRoad() is a fast coarse filter against a fixed radius; this is the
+    // exact test — the road varies from 1 to 3 lanes wide and can loop past.
+    function onAnyRoad(x, y, margin){
+      for (let i = 0; i < NPTS; i++){
+        const dx = pts[i][0] - x, dy = pts[i][1] - y;
+        const lim = widths[i] + margin;
+        if (dx * dx + dy * dy < lim * lim) return true;
+      }
+      return false;
+    }
     for (let i = 6; i < NPTS - 4; i += 3){
       const [px, py] = pts[i], [nx, ny] = normals[i], w = widths[i];
       for (const side of [-1, 1]){
         if (r() < 0.5) continue;
         const off = side * (w + 55 + r() * 300);
         const x = px + nx * off, y = py + ny * off;
-        if (!clearOfRoad(x, y, 165)) continue;
+        if (!clearOfRoad(x, y, 165) || onAnyRoad(x, y, 12)) continue;
         decor.push({ x, y, e: flora[Math.floor(r() * flora.length)], s: 20 + r() * 18 });
       }
       if (r() < 0.25){
         const side = r() < 0.5 ? -1 : 1;
         const off = side * (w + 40 + r() * 380);
         const x = px + nx * off, y = py + ny * off;
-        if (clearOfRoad(x, y, 175)) patches.push({ x, y, r: 45 + r() * 85 });
+        if (clearOfRoad(x, y, 175) && !onAnyRoad(x, y, 12)) patches.push({ x, y, r: 45 + r() * 85 });
       }
     }
+    // ducks paddle beside the bridge — but never on a road
     for (const [a, b] of bridges){
-      for (let k = 0; k < 3; k++){
+      let placed = 0;
+      for (let k = 0; k < 24 && placed < 3; k++){
         const i = a + Math.floor(r() * Math.max(b - a, 1));
         const [px, py] = pts[i], [nx, ny] = normals[i], w = widths[i];
         const off = (r() < 0.5 ? -1 : 1) * (w + 45 + r() * 70);
-        decor.push({ x: px + nx * off, y: py + ny * off, e: '🦆', s: 18 });
+        const x = px + nx * off, y = py + ny * off;
+        if (onAnyRoad(x, y, 15)) continue;
+        decor.push({ x, y, e: '🦆', s: 18 });
+        placed++;
       }
     }
   }
@@ -1133,9 +1148,9 @@
         const fp = $('finPoints');
         if (m.signedIn){
           fp.style.color = 'var(--dgreen)';
-          fp.textContent = m.points > 0
-            ? `🏆 +${m.points} championship points (P${m.rank} today)`
-            : '🏆 no points — top 100 only';
+          fp.textContent = m.rank <= 100
+            ? `🏆 provisionally P${m.rank} today — championship points are settled when the day ends`
+            : '🏆 top 100 scores — keep pushing!';
         } else if (authEnabled){
           fp.style.color = '#c96a1d';
           fp.textContent = '🏆 sign in to earn points for this result';
@@ -1811,15 +1826,20 @@
     const turnRate = (3.2 / (1 + me.size * 0.22)) * (me.z > 0 ? 0.35 : 1);
     if (steer) me.angle += steer * turnRate * dt;
 
-    // progress: nearest path point in a window around current idx
-    let best = 1e18, bi = idx;
-    for (let i = Math.max(0, idx - 25); i < Math.min(NPTS, idx + 55); i++){
+    // Progress: nearest path point near the current idx. On a hairpin the road
+    // doubles back, so a purely geometric search can snap onto the far side of
+    // the fold — and if that side happens to be a bridge, the game thinks a car
+    // on solid tarmac is in the water. Points far away in track order are
+    // therefore penalised; local movement (the free window) is not.
+    let bestScore = 1e18, bi = idx;
+    for (let i = Math.max(0, idx - 14); i < Math.min(NPTS, idx + 26); i++){
       const dx = pts[i][0] - me.x, dy = pts[i][1] - me.y;
-      const d = dx*dx + dy*dy;
-      if (d < best){ best = d; bi = i; }
+      const j = Math.abs(i - idx);
+      const score = dx*dx + dy*dy + (j > 6 ? (j - 6) * 1500 : 0);
+      if (score < bestScore){ bestScore = score; bi = i; }
     }
     idx = bi;
-    const dist = Math.sqrt(best);
+    const dist = Math.hypot(pts[idx][0] - me.x, pts[idx][1] - me.y);
     const onRoad = dist < widths[idx];
 
     // ramps: hit one grounded & fast → jump! (you fly over food and grass)
