@@ -234,12 +234,6 @@
 
   <button class="bigbtn" id="startBtn">ENTER SERVICE PARK</button>
 
-  <div class="card" id="crewBox">
-    <div class="cardHead">co-driver</div>
-    <div class="fineprint" style="margin:2px 0 8px">crew code <b id="crewCode" class="mono">····</b> — your co-driver opens <span id="crewUrl" class="mono">…/codriver</span> (or scans below) to call your pace notes. You bring the voice chat.</div>
-    <img id="crewQr" alt="co-driver QR" style="width:110px;height:110px;border-radius:10px">
-  </div>
-
   <div class="card" id="authBox" style="display:none">
     <div class="cardHead">account</div>
     <div id="authedOut">
@@ -252,18 +246,24 @@
     </div>
   </div>
 
+  <div class="card">
+    <div class="cardHead">today's times</div>
+    <div id="lbBox"><span class="spin"></span></div>
+    <div id="streakLabel" style="font-size:13px;color:var(--orange);font-weight:800;margin-top:4px"></div>
+  </div>
+
+  <div class="card" id="crewBox">
+    <div class="cardHead">co-driver</div>
+    <div class="fineprint" style="margin:2px 0 8px">crew code <b id="crewCode" class="mono">····</b> — your co-driver opens <span id="crewUrl" class="mono">…/codriver</span> (or scans below) to call your pace notes. You bring the voice chat.</div>
+    <img id="crewQr" alt="co-driver QR" style="width:110px;height:110px;border-radius:10px">
+  </div>
+
   <div class="card" id="monthBox">
     <div class="cardHead">championship</div>
     <div class="monthNav">
       <button id="monthPrev">‹</button><b id="monthLabel">—</b><button id="monthNext">›</button>
     </div>
     <div id="monthBody"><span class="spin"></span></div>
-  </div>
-
-  <div class="card">
-    <div class="cardHead">today's times</div>
-    <div id="lbBox"><span class="spin"></span></div>
-    <div id="streakLabel" style="font-size:13px;color:var(--orange);font-weight:800;margin-top:4px"></div>
   </div>
 
   <details class="info">
