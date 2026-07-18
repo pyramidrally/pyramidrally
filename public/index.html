@@ -83,9 +83,9 @@
   .evt{font-size:11px;font-weight:700;color:#5a6a4e;background:rgba(255,255,255,.85);border:1px solid #c8d8b8;
     border-radius:14px;padding:5px 10px;animation:evt 4s ease forwards}
   @keyframes evt{0%{opacity:0;transform:translateX(-12px)}10%{opacity:1;transform:none}80%{opacity:1}100%{opacity:0}}
-  #hudButtons{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:7;display:flex;gap:8px}
-  #hudButtons button{background:rgba(255,255,255,.88);border:2px solid #c8d8b8;border-radius:12px;
-    font-size:15px;font-weight:800;padding:6px 11px;cursor:pointer}
+  #hudButtons{position:fixed;top:58px;left:50%;transform:translateX(-50%);z-index:7;display:flex;gap:6px}
+  #hudButtons button{background:rgba(255,255,255,.88);border:2px solid #c8d8b8;border-radius:11px;
+    font-size:13px;font-weight:800;padding:5px 9px;cursor:pointer}
   #muteBtn{color:#7a8a6e}
   #restartBtn{color:var(--dgreen)}
   #homeBtn{color:#7a8a6e;font-size:13px}
@@ -218,7 +218,6 @@
     <button class="tog on" id="togMine">MY GHOSTS</button>
     <button class="tog on" id="togWorld">WORLD BEST</button>
     <button class="tog on" id="togSound">SOUND</button>
-    <button class="tog on" id="togMusic">MUSIC</button>
   </div>
 
   <button class="bigbtn" id="startBtn">ENTER SERVICE PARK</button>
@@ -275,6 +274,7 @@
   <div class="pyramidTip" id="finTip"></div>
   <div class="note">Food facts are simplified for the game — sources &amp; how-to are in the menu.</div>
   <button class="bigbtn orange" id="retryBtn">RETRY STAGE</button>
+  <button class="bigbtn ghostbtn" id="finMenuBtn">🎨 CHANGE DRIVER &amp; SETUP</button>
   <button class="bigbtn ghostbtn" id="shareBtn">📋 SHARE RESULT</button>
   <div class="lbTitle">TODAY'S LEADERBOARD</div>
   <div id="lbBox2"><span class="spin"></span></div>
@@ -728,35 +728,57 @@
     }
   }
 
-  // the crowd: fans of all veggie stripes cheering at start, finish, mid-stage, ramps & bridges
+  // the crowd: a sea of tiny fans — never on the road, never in the water
   const FAN_KINDS = [
-    { e: '🥬', c: '#7ddb6a' }, { e: '🍅', c: '#ff5b4d' }, { e: '🥕', c: '#ff8c2e' },
-    { e: '🌽', c: '#ffd23f' }, { e: '🍆', c: '#a06fd6' }, { e: '🫑', c: '#4dbd5c' },
+    { c: '#7ddb6a' }, { c: '#ff5b4d' }, { c: '#ff8c2e' },
+    { c: '#ffd23f' }, { c: '#a06fd6' }, { c: '#4dbd5c' },
+    { c: '#f5f2e8' }, { c: '#5bd1ff' },
   ];
   const crowds = [], crowdZones = [];
   {
     const r = mulberry32(SW[6]);
-    function fan(){ return FAN_KINDS[Math.floor(r() * FAN_KINDS.length)]; }
-    function addCrowd(iA, iB, density){
-      for (let i = Math.max(2, iA); i < Math.min(iB, NPTS - 2); i += 2){
+    function nearRoad(x, y){
+      for (let j = 0; j < NPTS; j += 3){
+        const dx = pts[j][0] - x, dy = pts[j][1] - y;
+        const w2 = widths[j] + 14;
+        if (dx * dx + dy * dy < w2 * w2) return true;
+      }
+      return false;
+    }
+    function inWater(x, y){
+      for (const [a, b] of bridges){
+        for (let j = Math.max(0, a - 2); j <= Math.min(NPTS - 1, b + 2); j += 2){
+          const dx = pts[j][0] - x, dy = pts[j][1] - y;
+          if (dx * dx + dy * dy < 210 * 210) return true;
+        }
+      }
+      return false;
+    }
+    function addCrowd(iA, iB, keep, farOff){
+      for (let i = Math.max(2, iA); i < Math.min(iB, NPTS - 2); i++){
         for (const side of [-1, 1]){
-          if (r() < (density || 0.24)) continue;
-          const [px, py] = pts[i], [nx, ny] = normals[i], w = widths[i];
-          const off = side * (w + 20 + r() * 46);
-          const k = fan();
-          crowds.push({ x: px + nx * off, y: py + ny * off, ph: r() * 6.3, s: 15 + r() * 8, e: k.e, c: k.c });
+          const n = 2 + Math.floor(r() * 4);
+          for (let k = 0; k < n; k++){
+            if (r() > keep) continue;
+            const [px, py] = pts[i], [nx, ny] = normals[i], w = widths[i];
+            const off = side * ((farOff || (w + 18)) + r() * 70);
+            const x = px + nx * off + (r() * 2 - 1) * 18;
+            const y = py + ny * off + (r() * 2 - 1) * 18;
+            if (nearRoad(x, y) || inWater(x, y)) continue;
+            crowds.push({ x, y, ph: r() * 6.3, s: 2 + r() * 2.4,
+              c: FAN_KINDS[Math.floor(r() * FAN_KINDS.length)].c });
+          }
         }
       }
     }
-    addCrowd(6, 26, 0.12); crowdZones.push(pts[16]);
-    addCrowd(FINISH_I - 12, FINISH_I + 4, 0.1); crowdZones.push(pts[FINISH_I - 3]);
+    addCrowd(6, 26, 0.9); crowdZones.push(pts[16]);
+    addCrowd(FINISH_I - 12, FINISH_I + 4, 0.9); crowdZones.push(pts[FINISH_I - 3]);
     for (let z = 0; z < 3; z++){
       const m = Math.floor(START_I + 50 + r() * (FINISH_I - START_I - 110));
-      addCrowd(m, m + 12, 0.22); crowdZones.push(pts[Math.min(m + 6, NPTS - 1)]);
+      addCrowd(m, m + 12, 0.7); crowdZones.push(pts[Math.min(m + 6, NPTS - 1)]);
     }
-    // fans always show up for the fun stuff — ramps and bridges
-    for (const rp of ramps){ addCrowd(rp.i - 6, rp.i + 6, 0.15); crowdZones.push(pts[rp.i]); }
-    for (const [a, b] of bridges){ addCrowd(a - 5, b + 5, 0.2); crowdZones.push(pts[Math.floor((a + b) / 2)]); }
+    for (const rp of ramps){ addCrowd(rp.i - 6, rp.i + 6, 0.75); crowdZones.push(pts[rp.i]); }
+    for (const [a, b] of bridges){ addCrowd(a - 4, b + 4, 0.75, 215); crowdZones.push(pts[Math.floor((a + b) / 2)]); }
   }
 
   // ============ scenery around the track ============
@@ -806,7 +828,7 @@
   const FACE_COLORS = ['#ffd23f','#ff8c2e','#7ddb6a','#5bd1ff','#ff7bac','#c9a2ff','#f5f2e8','#ffb35c'];
   const GRID = 18; // paint grid resolution
   const PAINT_COLORS = ['#23331f','#ffffff','#ff3b30','#ff8c2e','#ffd23f','#2fae4e','#5bd1ff','#c9a2ff'];
-  let profile = { name:'', face:{ color:'#ffd23f', paint:'' }, showMine:true, showWorld:true, sound:true, music:true, streak:{ last:'', count:0 } };
+  let profile = { name:'', face:{ color:'#ffd23f', paint:'' }, showMine:true, showWorld:true, sound:true, streak:{ last:'', count:0 } };
   try { const p = JSON.parse(localStorage.getItem('pr-profile')); if (p) profile = Object.assign(profile, p); } catch {}
   let myGhosts = []; // [{t,p:[x,y,s,...]}], [0]=PB
   try { const g = JSON.parse(localStorage.getItem('pr-ghosts-' + dateStr)); if (g) myGhosts = g; } catch {}
@@ -974,14 +996,11 @@
   renderPreview();
 
   function setTog(el, on){ el.classList.toggle('on', on); }
-  setTog($('togMine'), profile.showMine); setTog($('togWorld'), profile.showWorld); setTog($('togSound'), profile.sound); setTog($('togMusic'), profile.music !== false);
+  setTog($('togMine'), profile.showMine); setTog($('togWorld'), profile.showWorld); setTog($('togSound'), profile.sound);
   $('togMine').addEventListener('click', () => { profile.showMine = !profile.showMine; setTog($('togMine'), profile.showMine); saveProfile(); });
   $('togWorld').addEventListener('click', () => { profile.showWorld = !profile.showWorld; setTog($('togWorld'), profile.showWorld); saveProfile(); });
   $('togSound').addEventListener('click', () => { profile.sound = !profile.sound; setTog($('togSound'), profile.sound); saveProfile(); });
-  $('togMusic').addEventListener('click', () => {
-    profile.music = profile.music === false; setTog($('togMusic'), profile.music); saveProfile();
-    if (!profile.music) stopMusic(); else if (!racing || !started) startMusic();
-  });
+
   $('muteBtn').addEventListener('click', () => {
     profile.sound = !profile.sound; $('muteBtn').textContent = profile.sound ? '🔊' : '🔇'; saveProfile();
     if (!profile.sound){ stopEngine(); stopCrowd(); }
@@ -1146,6 +1165,23 @@
     if (crowdFilt) crowdFilt.frequency.value = 750 + level * 2800;
   }
   function stopCrowd(){ try { if (crowdSrc){ crowdSrc.stop(); crowdSrc = null; crowdGain = null; } } catch {} }
+  let nextHornT = 0;
+  function playHorn(vol){
+    try {
+      const t0 = audio.currentTime;
+      const o = audio.createOscillator(), g = audio.createGain(), f = audio.createBiquadFilter();
+      o.type = 'sawtooth';
+      o.frequency.value = 205 + Math.random() * 45; // vuvuzela drone
+      f.type = 'lowpass'; f.frequency.value = 850;
+      const dur = 0.5 + Math.random() * 0.9;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(vol, t0 + 0.06);
+      g.gain.setValueAtTime(vol, t0 + dur * 0.7);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(f); f.connect(g); g.connect(audio.destination);
+      o.start(t0); o.stop(t0 + dur + 0.05);
+    } catch {}
+  }
   function updateCrowdSound(now){
     if (!crowdGain || !me) return;
     let best = 1e18;
@@ -1158,63 +1194,15 @@
     const lvl = Math.max(0, 1 - dist / 700);
     const excited = dist < 240 ? 1.7 : 1; // they go wild when you're right there
     setCrowd(lvl * 0.13 * excited * (0.75 + 0.25 * Math.sin(now * 0.004)));
+    if (lvl > 0.3 && now > nextHornT && audio && profile.sound){
+      playHorn(Math.min(0.09, lvl * 0.09));
+      nextHornT = now + 900 + Math.random() * (3500 / lvl);
+    }
   }
   // mobile browsers may suspend audio until a touch — wake it up
   const resumeAudio = () => { try { if (audio) audio.resume(); if (racing && !engOsc) startEngine(); if (racing && !crowdSrc) startCrowd(); } catch {} };
   window.addEventListener('touchstart', resumeAudio, { passive: true });
   window.addEventListener('pointerdown', resumeAudio, { passive: true });
-
-  // ---- service-park radio: gentle public-domain classical melodies ----
-  // These are centuries-old compositions (public domain), synthesized fresh
-  // here as simple sequenced notes — no copyrighted recordings involved.
-  const midiFreq = n => 440 * Math.pow(2, (n - 69) / 12);
-  const MELODIES = [
-    { name: "Beethoven — Für Elise (opening)", tempo: 116, notes: [
-      [76,.5],[75,.5],[76,.5],[75,.5],[76,.5],[71,.5],[74,.5],[72,.5],[69,1],
-      [60,.5],[64,.5],[69,.5],[71,1],
-      [64,.5],[68,.5],[71,.5],[72,1.5],
-    ]},
-    { name: "Beethoven — Ode to Joy", tempo: 108, notes: [
-      [64,.5],[64,.5],[65,.5],[67,.5],[67,.5],[65,.5],[64,.5],[62,.5],
-      [60,.5],[60,.5],[62,.5],[64,.5],[64,.75],[62,.25],[62,1.5],
-    ]},
-    { name: "Minuet in G (Bach-style, original arrangement)", tempo: 100, notes: [
-      [67,.5],[71,.5],[74,.5],[72,.5],[71,.5],[69,.5],[67,1],
-      [69,.5],[71,.5],[72,.5],[74,.5],[76,.5],[74,.5],[72,1],
-      [67,.5],[69,.5],[71,.5],[67,.5],[64,.5],[62,.5],[60,1.5],
-    ]},
-  ];
-  let musicTimer = null, musicGain = null, musicPlaying = false;
-  function playNote(freq, startAt, dur, gainNode){
-    const o = audio.createOscillator(), g = audio.createGain();
-    o.type = 'triangle'; o.frequency.value = freq;
-    g.gain.setValueAtTime(0, startAt);
-    g.gain.linearRampToValueAtTime(0.16, startAt + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, startAt + dur * 0.92);
-    o.connect(g); g.connect(gainNode);
-    o.start(startAt); o.stop(startAt + dur);
-  }
-  function scheduleMelody(track){
-    if (!musicPlaying) return;
-    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
-    if (!musicGain){ musicGain = audio.createGain(); musicGain.gain.value = 0.5; musicGain.connect(audio.destination); }
-    const beat = 60 / track.tempo;
-    let t = audio.currentTime + 0.05;
-    for (const [n, d] of track.notes){ playNote(midiFreq(n), t, d * beat * 0.95, musicGain); t += d * beat; }
-    musicTimer = setTimeout(() => {
-      if (musicPlaying) scheduleMelody(MELODIES[(MELODIES.indexOf(track) + 1) % MELODIES.length]);
-    }, (t - audio.currentTime) * 1000);
-  }
-  function startMusic(){
-    if (!profile.music || musicPlaying) return;
-    musicPlaying = true;
-    scheduleMelody(MELODIES[Math.floor(Math.random() * MELODIES.length)]);
-  }
-  function stopMusic(){
-    musicPlaying = false;
-    clearTimeout(musicTimer);
-    if (musicGain){ try { musicGain.disconnect(); } catch {} musicGain = null; }
-  }
 
   function blip(freq, dur, type){
     if (!profile.sound) return;
@@ -1354,7 +1342,7 @@
   const BASE_R = 15, MAX_SPD = 430;
   let me = null, racing = false, started = false, raceT = 0, idx = 0, runT = 0, listAcc = 0, skids = [];
   let camX = 0, camY = 0, particles = [], recorded = [], recAcc = 0, posAcc = 0;
-  let activeGhosts = [], cpDone = [], ateGo = 0, ateWhoa = 0, maxSize = 0, wobbleT = 0, eatenList = [];
+  let activeGhosts = [], cpDone = [], ateGo = 0, ateWhoa = 0, maxSize = 0, wobbleT = 0, eatenList = [], wrongWayRefIdx = 0, wrongWayT = 0;
   const CPS = [0.25, 0.5, 0.75].map(f => Math.floor(START_I + (FINISH_I - START_I) * f));
   const decCache = {};
   let lastRank = 0, lastTimeMs = 0, lastMedal = '';
@@ -1368,18 +1356,21 @@
   }
   $('restartBtn').addEventListener('click', restartRun);
   function goToMenu(){
-    if (!racing) return;
+    const wasRacing = racing;
     racing = false; started = false;
     stopEngine(); stopCrowd();
-    leaveQueue();
-    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'run_end' }));
+    if (wasRacing){
+      leaveQueue();
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'run_end' }));
+    }
     ['hud','controls','minimap','muteBtn','restartBtn','homeBtn','rollHint','racersPanel'].forEach(id => $(id).classList.add('hidden'));
+    $('finish').classList.add('hidden');
     $('delta').classList.remove('show');
     renderLb($('lbBox'));
-    startMusic();
     $('menu').classList.remove('hidden');
   }
   $('homeBtn').addEventListener('click', goToMenu);
+  $('finMenuBtn').addEventListener('click', goToMenu);
   window.addEventListener('keydown', e => { if ((e.key === 'r' || e.key === 'R') && racing) restartRun(); });
   $('retryBtn').addEventListener('click', () => { $('finish').classList.add('hidden'); beginRun(); });
   window.addEventListener('keydown', e => {
@@ -1398,7 +1389,7 @@
     idx = 4; camX = me.x; camY = me.y;
     racing = true; started = false; raceT = 0; runT = 0; listAcc = 0;
     particles = []; recorded = []; recAcc = 0; posAcc = 0;
-    cpDone = [false, false, false]; ateGo = 0; ateWhoa = 0; maxSize = 0; eatenList = [];
+    cpDone = [false, false, false]; ateGo = 0; ateWhoa = 0; maxSize = 0; eatenList = []; wrongWayRefIdx = 0; wrongWayT = 0;
     for (const f of foods) f.eaten = false;
     for (const wp of waters) wp.taken = false;
     skids = [];
@@ -1439,7 +1430,6 @@
     started = true; raceT = 0;
     meQueued = false;
     if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'crossed' }));
-    stopMusic();
     $('rollHint').classList.add('hidden');
     blip(660, 0.15); blip(880, 0.2);
   }
@@ -1513,7 +1503,6 @@
     racing = false;
     stopEngine();
     stopCrowd();
-    startMusic();
     if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'run_end' }));
     const timeMs = dnf ? DNF_AT * 1000 : Math.round(raceT * 1000);
     lastTimeMs = timeMs;
@@ -1689,6 +1678,22 @@
       if (me.z <= 0){ me.z = 0; me.vz = 0; burst(me.x, me.y, '#b9cfa1', 8); }
     }
     // stray far off the road (cutting corners) → reset to the track
+    // driving backwards for a while? turn you around, back on track
+    if (started){
+      if (idx >= wrongWayRefIdx){ wrongWayRefIdx = idx; wrongWayT = 0; }
+      else if (idx < wrongWayRefIdx - 12){
+        wrongWayT += dt;
+        if (wrongWayT > 2.2){
+          burst(me.x, me.y, '#b9cfa1', 16);
+          const back = Math.min(wrongWayRefIdx, FINISH_I - 1);
+          me.x = pts[back][0]; me.y = pts[back][1];
+          me.angle = trackDir(back); me.vx = 0; me.vy = 0;
+          me.speed = 0; me.slowT = 0.4; me.stunT = 0.5;
+          idx = back; wrongWayT = 0;
+          foodToast('↩️ WRONG WAY — turned you around!', false);
+        }
+      }
+    }
     if (me.z === 0 && dist > widths[idx] + 110){
       burst(me.x, me.y, '#b9cfa1', 16);
       me.x = pts[idx][0]; me.y = pts[idx][1];
@@ -1943,16 +1948,13 @@
       ctx.font = d.s + 'px sans-serif';
       ctx.fillText(d.e, d.x, d.y);
     }
-    // the veggie crowd goes wild
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    // the crowd: a bobbing sea of dots
     for (const cb of crowds){
       const cx2 = cb.x - camX, cy2 = cb.y - camY;
-      if (Math.abs(cx2) > W/2 + 30 || Math.abs(cy2) > H/2 + 30) continue;
-      const bob = Math.sin(now * 0.007 + cb.ph) * 3;
-      ctx.save(); ctx.translate(cb.x, cb.y + bob); ctx.rotate(Math.sin(now * 0.004 + cb.ph) * 0.12);
-      ctx.font = cb.s + 'px sans-serif';
-      ctx.fillText(cb.e, 0, 0);
-      ctx.restore();
+      if (Math.abs(cx2) > W/2 + 20 || Math.abs(cy2) > H/2 + 20) continue;
+      const bob = Math.sin(now * 0.008 + cb.ph) * 1.4;
+      ctx.fillStyle = cb.c;
+      ctx.beginPath(); ctx.arc(cb.x, cb.y + bob, cb.s, 0, Math.PI * 2); ctx.fill();
     }
 
     // jump ramps
@@ -2154,7 +2156,6 @@
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
-  startMusic();
 })();
 </script>
 </body>

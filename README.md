@@ -15,8 +15,7 @@ jump the ramps, mind the rocks, and don't fall off the bridges.
 - 💧 Water shields, 🪨 rocks, jump ramps, bridges, one-lane narrows
 - 👥 Live positions of every racer, world-record ghost, personal ghosts
 - 🗣 Co-driver mode: scan the crew QR (or open `/codriver`, enter the 4-letter code) to read live pace notes to your driver
-- 🎻 Public-domain classical menu music, synthesized in-browser (Für Elise, Ode to Joy, an original Bach-style minuet)
-- 📻 Proximity crowd noise from the veggie fans
+- 📻 Proximity crowd noise + vuvuzela horns from the fan zones
 
 ## Run locally
 ```
