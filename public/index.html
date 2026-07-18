@@ -211,7 +211,7 @@
   <div class="card" id="authBox" style="display:none">
     <div class="cardHead">account</div>
     <div id="authedOut">
-      <div class="fineprint">Sign in to bank <b>monthly championship points</b>: 100 for winning a daily, 99 for 2nd… down to 1 for 100th. Anonymous runs still make the daily board, they just don't score.</div>
+      <div class="fineprint">Sign in to score points in the <b>monthly championship</b> — see the panel at the bottom of the menu for how it works.</div>
       <div id="gBtn"></div>
     </div>
     <div id="authedIn" style="display:none">
@@ -279,6 +279,17 @@
     </div>
   </details>
   <details class="info">
+    <summary>monthly championship</summary>
+    <div class="body">
+      • <b>Sign in</b> (top of the menu) and every daily stage starts scoring. Anonymous runs still make the daily board — they just don't bank points.<br>
+      • Points come from your <b>finishing position on the day</b>: 1st = 100, 2nd = 99, and so on down to 100th = 1. Below 100th, no points.<br>
+      • Only your <b>fastest run</b> each day counts, so restart as often as you like.<br>
+      • Everyone on the board takes up a position — including anonymous drivers — so a position they hold is one nobody banks.<br>
+      • Positions keep moving while the day is open, so <b>points settle when the stage closes</b> at midnight UTC.<br>
+      • Totals reset on the 1st of each month. Past months stay readable in the championship card via the ‹ › arrows.
+    </div>
+  </details>
+  <details class="info">
     <summary>where the food facts come from</summary>
     <div class="body">
       This game simplifies on purpose — no food is a villain! <b>WHOA foods are "sometimes" foods</b>, not forbidden ones, and portion size matters more than any single snack. The GO/WHOA idea and the one-line facts are based on guidance from:<br>
@@ -301,7 +312,6 @@
   <div class="medalBig" id="finMedal"></div>
   <div class="finishTime" id="finTime"></div>
   <div id="finSub" style="font-size:14px;color:#5a6a4e;margin-bottom:6px"></div>
-  <div id="finPoints" style="font-size:14px;font-weight:800;margin-bottom:6px"></div>
   <div class="ateBox"><span class="h" id="ateH">🥗 0</span><span class="j" id="ateJ">🍟 0</span></div>
   <div id="finEaten"></div>
   <div class="pyramidTip" id="finTip"></div>
@@ -1145,16 +1155,6 @@
         lb = m.lb; worldGhost = m.ghost || worldGhost;
         renderLb($('lbBox')); renderLb($('lbBox2'));
         finishAck(m.rank, m.total);
-        const fp = $('finPoints');
-        if (m.signedIn){
-          fp.style.color = 'var(--dgreen)';
-          fp.textContent = m.rank <= 100
-            ? `🏆 provisionally P${m.rank} today — championship points are settled when the day ends`
-            : '🏆 top 100 scores — keep pushing!';
-        } else if (authEnabled){
-          fp.style.color = '#c96a1d';
-          fp.textContent = '🏆 sign in to earn points for this result';
-        } else fp.textContent = '';
         if (m.month) renderMonth(m.month, m.standings || []);
       }
     });
