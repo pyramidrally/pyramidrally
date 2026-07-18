@@ -218,6 +218,7 @@ app.use(express.json({ limit: '16kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.get('/codriver', (req, res) => res.sendFile(path.join(__dirname, 'public', 'codriver.html')));
+app.get('/day', (req, res) => res.sendFile(path.join(__dirname, 'public', 'day.html')));
 
 app.get('/api/config', (req, res) => {
   res.json({ google: GOOGLE_CLIENT_ID || null, storage: storageMode, points: POINTS });
@@ -241,6 +242,19 @@ app.post('/api/login', async (req, res) => {
   } catch (e) {
     res.status(401).json({ error: 'sign-in could not be verified' });
   }
+});
+
+app.get('/api/day', (req, res) => {
+  const d = String(req.query.d || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return res.status(400).json({ error: 'bad date' });
+  const entries = (store.boards[d] || []).map((e, i) => ({
+    n: e.n, t: e.t, f: e.f,
+    a: e.u ? 1 : 0,
+    pts: e.u ? (POINTS[i] || 0) : 0,
+    would: POINTS[i] || 0,
+  }));
+  const days = Object.keys(store.boards).filter(k => (store.boards[k] || []).length).sort();
+  res.json({ date: d, today: today(), entries, total: entries.length, days });
 });
 
 app.get('/api/monthly', (req, res) => {
@@ -414,6 +428,13 @@ wss.on('connection', (ws) => {
       c.live = null;
       if (removeFromQueue(c)) broadcastQueue();
       for (const w of c.watchers) send(w, { t: 'drv_end' });
+      // A run counts only for the stage it was actually driven on. Someone who
+      // starts before midnight UTC and crosses the line after it has finished
+      // yesterday's stage, which must not land on today's board.
+      if (m.date && m.date !== today()) {
+        send(ws, { t: 'finish_stale', stage: m.date, today: today() });
+        return;
+      }
       const t = Math.round(Number(m.time));
       if (!Number.isFinite(t) || t < 20000 || t > 120000) return; // sanity: 20s–120s
       const p = Array.isArray(m.path) && m.path.length <= 3000 ? m.path.map(v => Math.round(Number(v)) || 0) : null;

@@ -15,6 +15,8 @@ jump the ramps, mind the rocks, and don't fall off the bridges.
 - 🚗 Momentum + grip physics: brake into corners and the tail drifts out
 - 💧 Water shields, 🪨 rocks, jump ramps, bridges, one-lane narrows
 - 👥 Live positions of every racer, world-record ghost, personal ghosts
+- 📅 Past stages get their own results page at /day?d=YYYY-MM-DD, linked from the menu
+- ⏱ Stages close at midnight UTC: a run driven on yesterday's stage can never land on today's board, and open tabs pick up the new stage automatically
 - 🗣 Co-driver mode: scan the crew QR (or open `/codriver`, enter the 4-letter code) to read live pace notes to your driver
 - 📻 Proximity crowd noise + vuvuzela horns from the fan zones
 
@@ -86,6 +88,7 @@ free instance restarts.
 - `server.js` — Express + WebSocket: live positions, global daily leaderboard, start-queue marshal, crew codes, QR endpoint
 - `public/index.html` — the whole game
 - `public/codriver.html` — live pace-notes page for co-drivers
+- `public/day.html` — full leaderboard for any past stage
 
 Nutrition framing is based on NIH "We Can!" GO/SLOW/WHOA, WHO healthy-diet
 guidance, USDA MyPlate and Harvard's Nutrition Source. It's a game, not

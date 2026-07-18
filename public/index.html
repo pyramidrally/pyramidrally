@@ -344,6 +344,7 @@
   window.addEventListener('resize', resize); resize();
 
   // ============ daily seed & cuisine ============
+  const HAS_SERVER = true; // port.py flips this for the standalone artifact
   const EPOCH = Date.UTC(2026, 0, 1);
   const dateStr = new Date().toISOString().slice(0, 10);
   const stageNo = Math.floor((Date.now() - EPOCH) / 86400000) + 1;
@@ -1156,6 +1157,15 @@
       }
       if (m.t === 'lb'){ lb = m.lb; renderLb($('lbBox')); renderLb($('lbBox2')); }
       if (m.t === 'event') tickEvent(m.msg);
+      if (m.t === 'finish_stale'){
+        stageExpired = true;
+        toast("⏱ That stage closed at midnight UTC — your time wasn't recorded.");
+        $('finSub').innerHTML += '<br>⏱ Stage ' + esc(m.stage) + ' has closed — this run is not on the board.';
+      }
+      if (m.t === 'welcome' && m.date && m.date !== dateStr){
+        // don't reload: if the device clock is wrong we would loop forever
+        toast('⚠️ Your clock says ' + dateStr + ' but today\'s stage is ' + m.date + '.');
+      }
       if (m.t === 'finish_ack'){
         lb = m.lb; worldGhost = m.ghost || worldGhost;
         renderLb($('lbBox')); renderLb($('lbBox2'));
@@ -1539,12 +1549,14 @@
   let me = null, racing = false, started = false, raceT = 0, idx = 0, runT = 0, listAcc = 0, skids = [];
   let camX = 0, camY = 0, particles = [], recorded = [], recAcc = 0, posAcc = 0;
   let activeGhosts = [], cpDone = [], ateGo = 0, ateWhoa = 0, maxSize = 0, wobbleT = 0, eatenList = [], wrongWayRefIdx = 0, wrongWayT = 0;
+  let stageExpired = false;
   const CPS = [0.25, 0.5, 0.75].map(f => Math.floor(START_I + (FINISH_I - START_I) * f));
   const decCache = {};
   let lastRank = 0, lastTimeMs = 0, lastMedal = '';
 
   $('startBtn').addEventListener('click', beginRun);
   function restartRun(){
+    if (stageExpired) return location.reload();
     if (!racing) return;
     stopEngine();
     if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'run_end' }));
@@ -1552,6 +1564,7 @@
   }
   $('restartBtn').addEventListener('click', restartRun);
   function goToMenu(){
+    if (stageExpired) return location.reload();
     const wasRacing = racing;
     racing = false; started = false;
     stopEngine(); stopCrowd();
@@ -1750,7 +1763,7 @@
       }
       $('finSub').innerHTML = (timeMs < pb ? '✨ NEW PERSONAL BEST!' : 'Personal best: ' + fmt(Math.min(pb, timeMs)))
         + (online ? '<br><span class="spin"></span> updating world leaderboard…' : '<br>Offline — time saved on this device');
-      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'finish', time: timeMs, path: recorded }));
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'finish', time: timeMs, path: recorded, date: dateStr }));
     } else {
       $('finSub').textContent = 'Out of time! Grab more GO foods to stay small and fast.';
     }
@@ -1788,7 +1801,9 @@
         const g = await getMyGhostsFor(d.date);
         if (g && g.length) myBest = g[0].t;
       } catch {}
-      out += '<div style="margin:6px 0 12px"><b>' + info.label + '</b> — ' + info.cuisine + '<br>';
+      const head = '<b>' + info.label + '</b> — ' + info.cuisine;
+      out += '<div style="margin:6px 0 12px">' +
+        (HAS_SERVER ? '<a href="/day?d=' + d.date + '" style="color:var(--dgreen)">' + head + ' ›</a>' : head) + '<br>';
       if (d.top && d.top.length){
         d.top.forEach((e, i) => { out += ['🥇','🥈','🥉'][i] + ' ' + esc(e.n) + ' — ' + fmt(e.t) + '<br>'; });
         if (d.total > 3) out += '<span style="color:#9aa88e">' + d.total + ' racers that day</span><br>';
@@ -1798,6 +1813,7 @@
       if (myBest) out += '⭐ your best: ' + fmt(myBest);
       out += '</div>';
     }
+    if (out && HAS_SERVER) out += '<div style="font-size:11px;color:#a5b199">Tap a stage for its full leaderboard.</div>';
     $('histBody').innerHTML = out || '<div class="note">No history yet — come back tomorrow!</div>';
   });
 
@@ -1805,7 +1821,26 @@
     const next = new Date(); next.setUTCHours(24, 0, 0, 0);
     const s = Math.max(0, Math.floor((next - Date.now()) / 1000));
     $('nextIn').textContent = `Next stage & cuisine in ${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor(s/60)%60).padStart(2,'0')}:${String(s%60).padStart(2,'0')} (UTC)`;
+    checkRollover();
   }, 1000);
+
+  // Midnight UTC ends the stage. The page may have been open for hours, so
+  // watch for the date changing under us: a run driven on yesterday's stage
+  // can never count for today, and the track itself has to be regenerated.
+  function checkRollover(){
+    if (stageExpired) return;
+    if (new Date().toISOString().slice(0, 10) === dateStr) return;
+    stageExpired = true;
+    if (racing){
+      toast('⏱ A new stage just started — finish up, this run no longer counts.');
+      $('rollHint').classList.remove('hidden');
+      $('rollHint').textContent = '⏱ STAGE CLOSED — NEW STAGE READY';
+    } else {
+      toast('🏁 New stage available — loading it now…');
+      setTimeout(() => location.reload(), 1500);
+    }
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkRollover(); });
 
   // ============ update ============
   let lastT = performance.now();

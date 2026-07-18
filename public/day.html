@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PYRAMID RALLY — stage results</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Rubik:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root{ --green:#2fae4e; --dgreen:#1c7a35; --orange:#ff8c2e; --ink:#23331f; --soft:#eef6e4; }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{background:linear-gradient(180deg,#f4f8ee 0%,#faf7f0 40%,#f6efe2 100%);
+    min-height:100vh;color:var(--ink);font-family:'Rubik',sans-serif;padding:20px 14px 40px}
+  .wrap{max-width:520px;margin:0 auto}
+  .checker{height:10px;border-radius:3px;margin-bottom:18px;
+    background:repeating-linear-gradient(90deg,#23331f 0 10px,#f5f2e8 10px 20px);opacity:.85}
+  .eyebrow{font-size:11px;letter-spacing:4px;text-transform:uppercase;color:#9aa88e;font-weight:700;text-align:center}
+  h1{font-family:'Archivo Black',sans-serif;font-size:clamp(26px,7vw,38px);color:var(--dgreen);
+    text-transform:lowercase;letter-spacing:-1px;text-align:center;margin:4px 0 18px}
+  .card{background:#fff;border:1px solid #dfe8d2;border-radius:14px;padding:14px 16px;margin-bottom:12px;
+    box-shadow:0 1px 2px rgba(35,51,31,.05)}
+  .stageHead{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .stageHead b{font-family:'Archivo Black',sans-serif;font-size:17px}
+  .stripes{width:70px;height:12px;border-radius:2px;
+    background:repeating-linear-gradient(-45deg,var(--orange) 0 6px,transparent 6px 12px)}
+  .srow{display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-top:1px dashed #e8efdd;color:#7a8a6e}
+  .srow b{color:var(--ink);font-weight:800}
+  .nav{display:flex;gap:8px;margin-bottom:14px}
+  .nav button, .nav a{flex:1;text-align:center;text-decoration:none;background:#fff;border:2px solid #c8d8b8;
+    color:#5a6a4e;border-radius:11px;font-family:'Rubik',sans-serif;font-weight:800;font-size:12.5px;
+    padding:10px 6px;cursor:pointer}
+  .nav button:disabled{opacity:.35;cursor:default}
+  .nav a.home{background:var(--green);border-color:var(--green);color:#fff}
+  table{border-collapse:collapse;width:100%}
+  td{padding:6px 5px;font-size:13.5px;border-bottom:1px solid #eef4e6;vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  td.pos{width:34px;color:#7a8a6e;font-weight:800}
+  td.fc{width:30px}
+  td.t{text-align:right;font-weight:800;white-space:nowrap}
+  td.p{text-align:right;width:44px;color:var(--dgreen);font-weight:800;white-space:nowrap}
+  tr.mine td{background:var(--soft)}
+  canvas.face{width:24px;height:24px;display:block}
+  .acct{color:var(--green);font-weight:800;margin-left:3px}
+  .note{color:#9aa88e;font-size:13px;text-align:center;padding:16px 0}
+  .foot{font-size:11px;color:#a5b199;text-align:center;margin-top:14px;line-height:1.7}
+  .spin{display:inline-block;width:16px;height:16px;border:3px solid #dfe8d2;border-top-color:var(--green);
+    border-radius:50%;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="checker"></div>
+  <div class="eyebrow">stage results</div>
+  <h1>pyramid rally</h1>
+
+  <div class="nav">
+    <button id="prev">‹ EARLIER</button>
+    <a class="home" href="/">TODAY'S STAGE</a>
+    <button id="next">LATER ›</button>
+  </div>
+
+  <div class="card">
+    <div class="stageHead"><b id="stageNo">SS #—</b><span class="stripes"></span></div>
+    <div class="srow"><span>date</span><b id="dDate">—</b></div>
+    <div class="srow"><span>cuisine</span><b id="dCuisine">—</b></div>
+    <div class="srow"><span>finishers</span><b id="dTotal">—</b></div>
+  </div>
+
+  <div class="card">
+    <div id="body"><div class="note"><span class="spin"></span></div></div>
+  </div>
+
+  <div class="foot">
+    ✓ marks a signed-in driver — only their results bank championship points.<br>
+    Points shown are what each position was worth on the day.
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const esc = s => { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; };
+  const fmt = ms => (ms / 1000).toFixed(2) + 's';
+
+  // ---- seeding, identical to index.html (a drift test guards this) ----
+  function sha256Words(str){
+    const K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+               0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+               0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+               0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+               0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+               0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+               0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+               0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+    let H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+    const bytes = [];
+    for (let i = 0; i < str.length; i++){
+      let c = str.charCodeAt(i);
+      if (c < 128) bytes.push(c);
+      else if (c < 2048){ bytes.push(192 | (c >> 6), 128 | (c & 63)); }
+      else { bytes.push(224 | (c >> 12), 128 | ((c >> 6) & 63), 128 | (c & 63)); }
+    }
+    const bitLen = bytes.length * 8;
+    bytes.push(0x80);
+    while (bytes.length % 64 !== 56) bytes.push(0);
+    for (let i = 7; i >= 0; i--) bytes.push(Math.floor(bitLen / Math.pow(2, i * 8)) & 255);
+    const rot = (v, n) => (v >>> n) | (v << (32 - n));
+    const w = new Array(64);
+    for (let off = 0; off < bytes.length; off += 64){
+      for (let i = 0; i < 16; i++)
+        w[i] = (bytes[off+i*4] << 24) | (bytes[off+i*4+1] << 16) | (bytes[off+i*4+2] << 8) | bytes[off+i*4+3];
+      for (let i = 16; i < 64; i++){
+        const s0 = rot(w[i-15], 7) ^ rot(w[i-15], 18) ^ (w[i-15] >>> 3);
+        const s1 = rot(w[i-2], 17) ^ rot(w[i-2], 19) ^ (w[i-2] >>> 10);
+        w[i] = (w[i-16] + s0 + w[i-7] + s1) | 0;
+      }
+      let a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+      for (let i = 0; i < 64; i++){
+        const S1 = rot(e, 6) ^ rot(e, 11) ^ rot(e, 25);
+        const ch = (e & f) ^ (~e & g);
+        const t1 = (h + S1 + ch + K[i] + w[i]) | 0;
+        const S0 = rot(a, 2) ^ rot(a, 13) ^ rot(a, 22);
+        const mj = (a & b) ^ (a & c) ^ (b & c);
+        const t2 = (S0 + mj) | 0;
+        h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      H = [(H[0]+a)|0,(H[1]+b)|0,(H[2]+c)|0,(H[3]+d)|0,(H[4]+e)|0,(H[5]+f)|0,(H[6]+g)|0,(H[7]+h)|0];
+    }
+    return H.map(v => v >>> 0);
+  }
+  function mulberry32(a){ return function(){ a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+  // MUST stay in the same order as CUISINES in index.html (checked by a test)
+  const CUISINE_NAMES = ['AMERICAN 🍔','INDIAN 🍛','ITALIAN 🍝','FRENCH 🥐','JAPANESE 🍱','CHINESE 🥡',
+    'KOREAN 🍲','THAI 🌶️','VIETNAMESE 🍜','MEXICAN 🌮','GREEK 🥙','SPANISH 🥘','GERMAN 🥨','POLISH 🥟',
+    'TURKISH 🧆','LEBANESE 🫓','MOROCCAN 🍲','CARIBBEAN 🥥','BRAZILIAN 🍖','BRITISH 🫖'];
+  const EPOCH = Date.UTC(2026, 0, 1);
+  const PAINT_COLORS = ['#23331f','#ffffff','#ff3b30','#ff8c2e','#ffd23f','#2fae4e','#5bd1ff','#c9a2ff'];
+  const GRID = 18;
+
+  function stageInfo(ds){
+    const sw = sha256Words('pyramid-' + ds);
+    return {
+      no: Math.floor((Date.parse(ds + 'T00:00:00Z') - EPOCH) / 86400000) + 1,
+      cuisine: CUISINE_NAMES[Math.floor(mulberry32(sw[1])() * CUISINE_NAMES.length)],
+    };
+  }
+
+  // compact version of the in-game face: base disc + paint pixels
+  function drawFace(g, face){
+    const r = 22;
+    g.clearRect(0, 0, 48, 48);
+    g.save(); g.translate(24, 24);
+    g.fillStyle = (face && face.color) || '#7ddb6a';
+    g.beginPath(); g.arc(0, 0, r, 0, Math.PI * 2); g.fill();
+    const paint = (face && face.paint) || '';
+    if (paint.length === GRID * GRID){
+      g.save();
+      g.beginPath(); g.arc(0, 0, r, 0, Math.PI * 2); g.clip();
+      const cell = (r * 2) / GRID;
+      for (let i = 0; i < paint.length; i++){
+        const v = paint.charCodeAt(i) - 48;
+        if (v <= 0) continue;
+        g.fillStyle = PAINT_COLORS[v - 1] || '#23331f';
+        g.fillRect(-r + (i % GRID) * cell, -r + ((i / GRID) | 0) * cell, cell + 0.5, cell + 0.5);
+      }
+      g.restore();
+    }
+    g.fillStyle = '#23331f';
+    g.beginPath(); g.arc(-r * 0.32, -r * 0.12, r * 0.11, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc( r * 0.32, -r * 0.12, r * 0.11, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = '#23331f'; g.lineWidth = 2; g.lineCap = 'round';
+    g.beginPath(); g.arc(0, r * 0.12, r * 0.4, 0.25 * Math.PI, 0.75 * Math.PI); g.stroke();
+    g.restore();
+  }
+
+  const qs = new URLSearchParams(location.search);
+  function yesterday(){ return new Date(Date.now() - 86400000).toISOString().slice(0, 10); }
+  let date = qs.get('d');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) date = yesterday();
+  let days = [];
+
+  function go(d){ location.search = '?d=' + d; }
+
+  async function load(){
+    const info = stageInfo(date);
+    $('stageNo').textContent = 'SS #' + info.no;
+    $('dDate').textContent = date;
+    $('dCuisine').textContent = info.cuisine;
+    let j = null;
+    try { j = await fetch('/api/day?d=' + encodeURIComponent(date)).then(r => r.json()); } catch {}
+    if (!j || j.error){
+      $('body').innerHTML = '<div class="note">Could not load this stage.</div>';
+      $('dTotal').textContent = '—';
+      return;
+    }
+    days = j.days || [];
+    $('dTotal').textContent = j.total ? j.total + (j.total === 1 ? ' driver' : ' drivers') : 'none';
+
+    const i = days.indexOf(date);
+    const earlier = i > 0 ? days[i - 1] : (days.length && date > days[0] ? days[days.length - 1] : null);
+    const later = i >= 0 && i < days.length - 1 ? days[i + 1] : null;
+    $('prev').disabled = !earlier;
+    $('next').disabled = !later;
+    $('prev').onclick = () => earlier && go(earlier);
+    $('next').onclick = () => later && go(later);
+
+    if (!j.entries.length){
+      $('body').innerHTML = '<div class="note">No times were set on this stage.</div>';
+      return;
+    }
+    const rows = j.entries.map((e, k) => {
+      const medal = ['🥇','🥈','🥉'][k] || (k + 1) + '.';
+      const pts = e.a ? e.pts : '';
+      return '<tr><td class="pos">' + medal + '</td>' +
+        '<td class="fc"><canvas class="face" width="48" height="48" data-i="' + k + '"></canvas></td>' +
+        '<td>' + esc(e.n) + (e.a ? '<span class="acct" title="signed in">✓</span>' : '') + '</td>' +
+        '<td class="t">' + fmt(e.t) + '</td>' +
+        '<td class="p">' + (pts ? pts + 'p' : '') + '</td></tr>';
+    }).join('');
+    $('body').innerHTML = '<table>' + rows + '</table>';
+    document.querySelectorAll('canvas.face').forEach(cv => {
+      drawFace(cv.getContext('2d'), j.entries[+cv.dataset.i].f);
+    });
+  }
+  load();
+})();
+</script>
+</body>
+</html>
