@@ -195,6 +195,14 @@
   .aidisc{max-width:430px;margin:18px auto 6px;padding:11px 13px;border:1px dashed #d5e0c6;border-radius:11px;
     font-size:11.5px;line-height:1.65;color:#8a9880;text-align:center;background:rgba(255,255,255,.45)}
   .aidisc b{color:#6a7a5e}
+  #specBar{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:9;display:flex;
+    align-items:center;gap:7px;background:rgba(35,51,31,.9);border-radius:14px;padding:7px 9px;
+    box-shadow:0 3px 12px rgba(35,51,31,.25)}
+  #specBar button{background:rgba(255,255,255,.14);border:none;color:#fff;border-radius:9px;
+    font-size:15px;font-weight:800;padding:5px 10px;cursor:pointer;font-family:'Rubik',sans-serif}
+  #specBar #specExit{background:rgba(255,120,100,.3)}
+  #specWho{color:#fff;font-size:12.5px;font-weight:800;text-align:center;min-width:132px;line-height:1.35}
+  #specWho span{display:block;font-size:10.5px;font-weight:600;color:#b9cfa1;letter-spacing:.4px}
   #authBox .fineprint{text-align:left}
   #gBtn{display:flex;justify-content:center;min-height:42px}
 </style>
@@ -267,6 +275,7 @@
   </div>
 
   <button class="bigbtn" id="startBtn">ENTER SERVICE PARK</button>
+  <button class="bigbtn ghostbtn" id="spectateBtn">👀 SPECTATE</button>
 
   <div class="card">
     <div class="cardHead">today's times</div>
@@ -344,6 +353,13 @@
 </div>
 
 <!-- FINISH -->
+<div id="specBar" class="hidden">
+  <button id="specPrev">‹</button>
+  <div id="specWho"><b>—</b><span id="specSub"></span></div>
+  <button id="specNext">›</button>
+  <button id="specExit">✕</button>
+</div>
+
 <div class="overlay hidden" id="finish">
   <div class="cuisine" id="finStage"></div>
   <div class="medalBig" id="finMedal"></div>
@@ -1617,6 +1633,7 @@
   let activeGhosts = [], cpDone = [], ateGo = 0, ateWhoa = 0, maxSize = 0, wobbleT = 0, eatenList = [], wrongWayRefIdx = 0, wrongWayT = 0;
   let clipEvents = []; // {t, kind} — drives highlight picking, never leaves the device
   let stageExpired = false;
+  let spectating = false, specTarget = null;
   const CPS = [0.25, 0.5, 0.75].map(f => Math.floor(START_I + (FINISH_I - START_I) * f));
   const decCache = {};
   let lastRank = 0, lastTimeMs = 0, lastMedal = '';
@@ -1632,6 +1649,7 @@
   $('restartBtn').addEventListener('click', restartRun);
   function goToMenu(){
     if (stageExpired) return location.reload();
+    if (spectating) return exitSpectate();
     const wasRacing = racing;
     racing = false; started = false;
     stopEngine(); stopCrowd();
@@ -1647,7 +1665,16 @@
   }
   $('homeBtn').addEventListener('click', goToMenu);
   $('finMenuBtn').addEventListener('click', goToMenu);
-  window.addEventListener('keydown', e => { if ((e.key === 'r' || e.key === 'R') && racing) restartRun(); });
+  window.addEventListener('keydown', e => {
+    const typing = /^(INPUT|TEXTAREA)$/.test((e.target && e.target.tagName) || '');
+    if (typing) return;
+    if (e.key === 'r' || e.key === 'R'){ if (racing) restartRun(); return; }
+    if (e.key === 'Backspace'){
+      // browsers used to navigate back on backspace — never let that happen mid-run
+      e.preventDefault();
+      if (racing) restartRun();
+    }
+  });
   $('retryBtn').addEventListener('click', () => { $('finish').classList.add('hidden'); beginRun(); });
   window.addEventListener('keydown', e => {
     if (e.key === 'Enter'){
@@ -2208,14 +2235,7 @@
     camX += (me.x - camX) * Math.min(dt * 5, 1);
     camY += (me.y - camY) * Math.min(dt * 5, 1);
 
-    // lerp other live players toward their latest server position
-    for (const o of others.values()){
-      if (o.tx === undefined) continue;
-      const mvx = (o.tx - o.x) * Math.min(dt * 8, 1);
-      const mvy = (o.ty - o.y) * Math.min(dt * 8, 1);
-      o.x += mvx; o.y += mvy;
-      if (mvx * mvx + mvy * mvy > 0.4) o.hd = Math.atan2(mvy, mvx);
-    }
+    lerpOthers(dt);
 
     for (const p of particles){ p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
     particles = particles.filter(p => p.life > 0);
@@ -2507,7 +2527,7 @@
     }
 
     // me (lifts off the ground when jumping)
-    {
+    if (!spectating) {
       const r = BASE_R + me.size * 5;
       ctx.save(); ctx.translate(me.x, me.y);
       if (me.z > 0){
@@ -2568,11 +2588,112 @@
     ctx.restore();
   }
 
+  // smooth other cars toward their latest server position — needed while
+  // racing AND while spectating, so it lives outside update()
+  function lerpOthers(dt){
+    for (const o of others.values()){
+      if (o.tx === undefined) continue;
+      const mvx = (o.tx - o.x) * Math.min(dt * 8, 1);
+      const mvy = (o.ty - o.y) * Math.min(dt * 8, 1);
+      o.x += mvx; o.y += mvy;
+      if (mvx * mvx + mvy * mvy > 0.4) o.hd = Math.atan2(mvy, mvx);
+    }
+  }
+
+  // ============ spectator mode ============
+  // The server already broadcasts every live car to everyone, so watching costs
+  // nothing extra: we simply stop driving and let `me` ride along as a camera
+  // on whoever is being watched. With an empty stage you get the start line.
+  function liveList(){
+    const out = [];
+    for (const [id, o] of others) if (o.x != null) out.push({ id, o });
+    out.sort((a, b) => a.id - b.id);
+    return out;
+  }
+  function specName(){
+    const t = specTarget != null ? others.get(specTarget) : null;
+    return t ? t.n : null;
+  }
+  function updateSpecBar(){
+    const list = liveList();
+    const t = specTarget != null ? others.get(specTarget) : null;
+    if (t){
+      $('specWho').innerHTML = '<b>' + esc(t.n) + '</b><span>' +
+        (list.length > 1 ? 'watching · ' + (list.findIndex(e => e.id === specTarget) + 1) + ' of ' + list.length : 'watching') + '</span>';
+    } else {
+      $('specWho').innerHTML = '<b>NOBODY ON STAGE</b><span>' +
+        (online ? 'waiting at the start line' : 'offline') + '</span>';
+    }
+    $('specPrev').disabled = list.length < 2;
+    $('specNext').disabled = list.length < 2;
+  }
+  function specStep(dir){
+    const list = liveList();
+    if (!list.length){ specTarget = null; updateSpecBar(); return; }
+    let i = list.findIndex(e => e.id === specTarget);
+    if (i < 0) i = 0; else i = (i + dir + list.length) % list.length;
+    specTarget = list[i].id;
+    updateSpecBar();
+  }
+  function updateSpectate(dt, now){
+    if (!me) return;
+    lerpOthers(dt);
+    const list = liveList();
+    if (specTarget != null && !others.has(specTarget)) specTarget = null;
+    if (specTarget == null && list.length) specStep(0);
+    const t = specTarget != null ? others.get(specTarget) : null;
+    const tx = t ? t.x : pts[START_I][0];
+    const ty = t ? t.y : pts[START_I][1];
+    me.x += (tx - me.x) * Math.min(dt * 6, 1);
+    me.y += (ty - me.y) * Math.min(dt * 6, 1);
+    camX += (me.x - camX) * Math.min(dt * 5, 1);
+    camY += (me.y - camY) * Math.min(dt * 5, 1);
+    specAcc = (specAcc || 0) + dt;
+    if (specAcc > 0.5){ specAcc = 0; updateSpecBar(); renderRacers(); }
+  }
+  let specAcc = 0;
+
+  function enterSpectate(){
+    if (racing) return;
+    spectating = true;
+    specTarget = null;
+    me = { x: pts[START_I][0], y: pts[START_I][1], angle: trackDir(START_I), speed: 0,
+           vx: 0, vy: 0, size: 0, boostT: 0, slowT: 0, z: 0, vz: 0, stunT: 0, invulnT: 0, shieldT: 0 };
+    camX = me.x; camY = me.y;
+    idx = START_I;
+    $('menu').classList.add('hidden');
+    $('specBar').classList.remove('hidden');
+    $('minimap').classList.remove('hidden');
+    $('racersPanel').classList.remove('hidden');
+    specStep(0);
+    updateSpecBar();
+  }
+  function exitSpectate(){
+    spectating = false;
+    specTarget = null;
+    me = null;
+    $('specBar').classList.add('hidden');
+    ['minimap','racersPanel'].forEach(id => $(id).classList.add('hidden'));
+    $('menu').classList.remove('hidden');
+    renderLb($('lbBox'));
+  }
+  $('spectateBtn').addEventListener('click', enterSpectate);
+  $('specExit').addEventListener('click', exitSpectate);
+  $('specPrev').addEventListener('click', () => specStep(-1));
+  $('specNext').addEventListener('click', () => specStep(1));
+  window.addEventListener('keydown', e => {
+    if (!spectating) return;
+    if (e.key === 'Escape') exitSpectate();
+    if (e.key === 'ArrowLeft') specStep(-1);
+    if (e.key === 'ArrowRight') specStep(1);
+  });
+
   // ============ loop ============
   function loop(now){
     const dt = Math.min((now - lastT) / 1000, 0.05);
     lastT = now;
     if (racing) update(dt, now);
+    else if (spectating) updateSpectate(dt, now);
     render(now);
     requestAnimationFrame(loop);
   }

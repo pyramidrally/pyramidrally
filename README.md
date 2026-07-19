@@ -11,6 +11,8 @@ jump the ramps, mind the rocks, and don't fall off the bridges.
 - 🌍 Daily seeded stage — identical for every player, every run (items included)
 - 🏆 Monthly championship: points for every daily, for signed-in drivers
 - 🎬 Highlight GIFs: the game finds the best few seconds of your run and encodes a shareable GIF in the browser
+- 👀 Spectator mode: watch anyone currently on the stage, cycling between them
+- ⌨️ Backspace restarts a run for keyboard players
 - 🏁 FPRC daily reel: the leader, the pack and the last finisher, cut together with rally commentary
 - 🍜 20 rotating cuisines (Korean, Vietnamese, Polish, Mexican, Turkish, Caribbean…), each with its own GO/WHOA foods and one-line nutrition facts
 - 🏁 Real service-park start queue: the server marshal releases the next driver 3 s after the previous one crosses the line — no bots, only real people
