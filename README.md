@@ -47,9 +47,14 @@ did not happen. Lines are burned into the clip as captions; the results page
 can also speak them aloud with the browser voice while the reel plays, though
 browsers will not let that voice be captured into the saved file.
 
-The results page builds the **FPRC reel** for a finished stage the same way,
-from the recorded lines the server keeps (the top few finishers plus the last
-one home), so the reel is a spread of the day rather than just the winner.
+The results page builds the **FPRC reel** by casting for incident rather than
+for lap time — finishing order makes a dull reel, because the quick drivers are
+the tidy ones. Every recorded line on the stage is scanned for its best moment
+of each kind (a splash off a bridge, big air off a ramp, running out of road,
+hanging it sideways, an outright charge), and roughly half a minute is cut from
+about six drivers, chosen so the reel keeps changing shape. The leader opens at
+their wildest moment and whoever came home last signs off. The server keeps
+recorded lines for the top fourteen plus the last finisher, for seven days.
 
 ### Link previews
 Pages carry `%SITE_URL%` placeholders which the server fills in per request

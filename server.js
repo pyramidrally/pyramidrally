@@ -136,7 +136,8 @@ function thisMonth() { return today().slice(0, 7); }
 function board() { return (store.boards[today()] = store.boards[today()] || []); }
 
 const KEEP_DAYS = 40; // enough to always recompute the current month from source
-const CLIP_KEEP = 5;  // recorded lines kept per stage, for the daily highlight reel
+const CLIP_KEEP = 14;  // recorded lines kept per stage, so the reel can be cast
+const CLIP_DAYS = 7;   // ...but only for recent stages: lines are the bulk of the store
 
 let saveTimer = null;
 function saveBoards() {
@@ -146,6 +147,14 @@ function saveBoards() {
     const slim = {};
     for (const k of keys) slim[k] = store.boards[k];
     store.boards = slim;
+    // recorded lines dominate the size of the store, so only recent stages keep
+    // them; older days still have their full results, just no reel
+    const clipCutoff = keys.slice(-CLIP_DAYS)[0];
+    for (const k of keys) {
+      if (clipCutoff && k < clipCutoff) {
+        for (const e of store.boards[k]) if (e.p) delete e.p;
+      }
+    }
     for (const ym of monthsInBoards()) store.months[ym] = computeMonth(ym);
     fs.writeFile(LB_FILE, JSON.stringify(store), () => {});
     saveRemote();

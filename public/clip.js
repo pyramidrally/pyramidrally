@@ -598,6 +598,123 @@
     };
   }
 
+  // ====================================================== casting the reel ==
+  // Finishing order makes a dull reel: the top three all drive tidily. What is
+  // worth watching is a MOMENT — someone launching off a ramp, dropping it into
+  // the water, running wide, or hanging the car sideways through a hairpin. So
+  // every recorded line is scanned for its best moment of each kind, and the
+  // cast is picked for variety of incident rather than for lap time.
+  const MOMENTS = {
+    splash:   { badge: 'SPLASH!',   weight: 3.4 },
+    air:      { badge: 'BIG AIR',   weight: 2.8 },
+    off:      { badge: 'OFF ROAD',  weight: 2.0 },
+    sideways: { badge: 'SIDEWAYS',  weight: 1.7 },
+    charge:   { badge: 'FLAT OUT',  weight: 1.0 },
+  };
+
+  function analyseRun(path, dtMs, stage, seconds) {
+    const n = Math.floor(path.length / 3);
+    const win = Math.max(4, Math.round((seconds * 1000) / dtMs));
+    const kinds = Object.keys(MOMENTS);
+    const per = {};
+    for (const k of kinds) per[k] = new Float64Array(n);
+    if (n < win + 2) return null;
+
+    const bridges = stage.bridges || [];
+    const onBridge = j => bridges.some(([a, b]) => j >= a && j <= b);
+    const ramps = (stage.ramps || []).map(r => r.i);
+
+    for (let i = 1; i < n - 1; i++) {
+      const x = path[i * 3], y = path[i * 3 + 1], j = path[i * 3 + 2];
+      const px = path[(i - 1) * 3], py = path[(i - 1) * 3 + 1];
+      const nx2 = path[(i + 1) * 3], ny2 = path[(i + 1) * 3 + 1];
+      const step = Math.hypot(x - px, y - py);
+      const sp = step / (dtMs / 1000);
+      let turn = Math.atan2(ny2 - y, nx2 - x) - Math.atan2(y - py, x - px);
+      while (turn > Math.PI) turn -= 2 * Math.PI;
+      while (turn < -Math.PI) turn += 2 * Math.PI;
+      const curve = Math.abs(turn) / Math.max(step, 6);
+      const gap = offRoadAt(stage, x, y, j);
+
+      if (gap > 4 && onBridge(j)) per.splash[i] += 6;
+      if (gap > 18) per.off[i] += Math.min(gap / 40, 3);
+      if (ramps.some(r => Math.abs(r - j) <= 1) && sp > 200) per.air[i] += 5;
+      if (curve > 0.0035 && sp > 150) per.sideways[i] += curve * 400 * Math.min(sp / 300, 1.4);
+      if (sp > 320) per.charge[i] += (sp - 320) / 90;
+    }
+
+    const best = {};
+    for (const k of kinds) {
+      const a = per[k];
+      let run = 0;
+      for (let i = 0; i < win; i++) run += a[i];
+      let top = -1, topStart = 0;
+      for (let s = 0; s + win < n; s++) {
+        if (s > 0) run += a[s + win - 1] - a[s - 1];
+        if (s > Math.round(1200 / dtMs) && run > top) { top = run; topStart = s; }
+      }
+      best[k] = { kind: k, start: topStart, end: topStart + win, raw: top,
+                  score: top * MOMENTS[k].weight };
+    }
+    let winner = null;
+    for (const k of kinds) if (!winner || best[k].score > winner.score) winner = best[k];
+    return { best, winner, hasMoment: winner && winner.raw > 0.9 };
+  }
+
+  // entries: [{ name, time, face, path, rank, isLast }] in finishing order
+  function buildCast(entries, stage, o) {
+    const opts = o || {};
+    const dtMs = opts.dtMs || 150;
+    const seconds = opts.seconds || 4.4;
+    const target = opts.cast || 6;
+    const usable = entries.filter(e => e.path && e.path.length > 60);
+    if (!usable.length) return [];
+
+    const analysed = usable.map(e => ({ e, a: analyseRun(e.path, dtMs, stage, seconds) }))
+                           .filter(o2 => o2.a);
+    if (!analysed.length) return [];
+
+    const cast = [];
+    const used = new Set();
+    const add = (o2, kind, label) => {
+      if (!o2 || used.has(o2.e)) return;
+      const m = o2.a.best[kind] || o2.a.winner;
+      used.add(o2.e);
+      cast.push({ entry: o2.e, start: m.start, end: m.end, kind,
+                  badge: label || MOMENTS[kind].badge });
+    };
+
+    // the leader always opens, at their best moment rather than a tidy corner
+    const leader = analysed.find(o2 => o2.e.rank === 1);
+    if (leader) add(leader, leader.a.winner.kind, 'LEADER');
+
+    // then the strongest moment of each kind, so the reel keeps changing shape
+    for (const kind of Object.keys(MOMENTS)) {
+      const ranked = analysed.filter(o2 => !used.has(o2.e) && o2.a.best[kind].raw > 0.9)
+                             .sort((p, q) => q.a.best[kind].raw - p.a.best[kind].raw);
+      if (ranked.length) add(ranked[0], kind);
+      if (cast.length >= target - 1) break;
+    }
+
+    // whoever came home last gets the sign-off
+    const last = analysed.find(o2 => o2.e.isLast && !used.has(o2.e));
+    if (last && cast.length < target) add(last, last.a.winner.kind, 'LAST HOME');
+
+    // still short? fill with the best remaining moments of any kind
+    if (cast.length < target) {
+      const rest = analysed.filter(o2 => !used.has(o2.e))
+                           .sort((p, q) => q.a.winner.score - p.a.winner.score);
+      for (const o2 of rest) {
+        if (cast.length >= target) break;
+        add(o2, o2.a.winner.kind);
+      }
+    }
+    return cast;
+  }
+
+  root.analyseRun = analyseRun;
+  root.buildCast = buildCast;
+  root.MOMENTS = MOMENTS;
   root.commentate = commentate;
   root.playClip = playClip;
   root.pickHighlight = pickHighlight;
