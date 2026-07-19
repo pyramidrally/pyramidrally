@@ -1862,9 +1862,15 @@
       const stage = { pts, widths, normals, NPTS, bridges, START_I, FINISH_I };
       btn.textContent = '🎬 drawing…';
       await new Promise(r => setTimeout(r, 30));
+      const lines = FPRClip.commentate({
+        path: recorded, dtMs: GHOST_HZ, stage, start: hl.start, end: hl.end,
+        events: clipEvents,
+        driver: { name: profile.name || 'RACER', time: fmt(lastTimeMs), date: dateStr,
+                  rank: lastRank || 0, pos: lastRank ? 'P' + lastRank : '' },
+      });
       const { frames, fps } = FPRClip.renderClip(cv, stage, [{
         path: recorded, dtMs: GHOST_HZ, start: hl.start, end: hl.end,
-        face: profile.face,
+        face: profile.face, lines,
         caption: (profile.name || 'RACER') + ' · ' + fmt(lastTimeMs),
         sub: 'SS #' + stageNo + ' · ' + cuisine.name,
         badge: 'HIGHLIGHT',

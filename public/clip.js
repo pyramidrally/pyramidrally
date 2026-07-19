@@ -68,6 +68,162 @@
     return { start: bestStart, end: bestStart + win, score: best };
   }
 
+  // ========================================================== commentary ====
+  // Rally commentary written from the telemetry, so it can only ever describe
+  // something that actually happened: how fast, how hard they were turning and
+  // which way, whether they were on a bridge, off the road, or in the air.
+  // Deterministic — the same run always gets the same call.
+
+  const LINES = {
+    openFirst: ["{n} on the road, and this is the benchmark.",
+                "Here's {n} — quickest of the day so far.",
+                "{n} now. Watch how early they get on the power."],
+    openMid:   ["{n} next, {p} on the day.",
+                "Here's {n}, running {p}.",
+                "{n} now — solid run, {p} overall."],
+    openLast:  ["{n} last home, but home.",
+                "And {n}, who took the scenic route.",
+                "{n} to finish — not the fastest, but they finished."],
+    open:      ["{n} on the stage.", "Here's {n}.", "{n}, then."],
+    fast:      ["Flat out through here.", "Foot to the floor.",
+                "Big speed on this section.", "No lifting — none at all."],
+    easyL:     ["Long left, opening up.", "Gentle left, carrying the speed."],
+    easyR:     ["Long right, opening up.", "Gentle right, and they hold it."],
+    hardL:     ["Hard left — committed.", "Big left, and they're leaning on it.",
+                "Into the left, plenty of lock."],
+    hardR:     ["Hard right — committed.", "Big right, and they're leaning on it.",
+                "Into the right, plenty of lock."],
+    pinL:      ["Hairpin left — hard on the brakes.", "Left hairpin, all the way round.",
+                "Tightens left, and that's caught plenty out."],
+    pinR:      ["Hairpin right — hard on the brakes.", "Right hairpin, all the way round.",
+                "Tightens right, and that's caught plenty out."],
+    bridge:    ["Onto the bridge — no room for error.", "Over the water now.",
+                "Bridge next, and it's narrow."],
+    splash:    ["Off the deck — and into the water!", "That's a splash! Run ruined.",
+                "Straight off the bridge — oh, that's cost them."],
+    off:       ["Wide! Into the grass.", "Runs out of road there.",
+                "That's untidy — completely off line.", "Too much speed, and they lose it."],
+    jump:      ["Off the ramp — huge air!", "Launches it, and lands it.",
+                "Airborne over the crest."],
+    go:        ["Takes the greens, and the car lightens.", "Another one collected.",
+                "Straight through the good stuff."],
+    whoa:      ["Oh, into the fryer — that'll cost them.",
+                "Picks up something heavy there.", "That's the wrong thing to eat."],
+    finish:    ["Across the line — {t}.", "And that's the stage done. {t}.",
+                "Takes the flag in {t}."],
+  };
+
+  function rng(seedStr) {
+    let h = 2166136261;
+    for (let i = 0; i < seedStr.length; i++) { h ^= seedStr.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return function () {
+      h ^= h << 13; h >>>= 0; h ^= h >> 17; h ^= h << 5; h >>>= 0;
+      return h / 4294967296;
+    };
+  }
+
+  function offRoadAt(stage, x, y, j) {
+    const { pts, widths, NPTS } = stage;
+    let gap = 1e9;
+    for (let i = Math.max(0, j - 14); i <= Math.min(NPTS - 2, j + 14); i++) {
+      const ax = pts[i][0], ay = pts[i][1];
+      const vx = pts[i + 1][0] - ax, vy = pts[i + 1][1] - ay;
+      const L2 = vx * vx + vy * vy || 1;
+      let t = ((x - ax) * vx + (y - ay) * vy) / L2;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const d = Math.hypot(ax + vx * t - x, ay + vy * t - y) - widths[i];
+      if (d < gap) gap = d;
+    }
+    return gap;
+  }
+
+  // returns [{ t, text }] with t in ms from the start of the window
+  function commentate(o) {
+    const { path, dtMs, stage, start, end, driver } = o;
+    const R = rng((driver && driver.name || '') + '|' + (driver && driver.date || '') + '|' + start);
+    const pick = key => { const a = LINES[key]; return a[Math.floor(R() * a.length)]; };
+    const fill = (s, d) => s.replace('{n}', (d && d.name) || 'This driver')
+                            .replace('{p}', (d && d.pos) || '')
+                            .replace('{t}', (d && d.time) || '');
+    const out = [];
+    const MIN_GAP = 1900;                       // don't talk over yourself
+    const say = (t, text) => {
+      if (out.length && t - out[out.length - 1].t < MIN_GAP) return false;
+      out.push({ t, text });
+      return true;
+    };
+
+    const rel = i => (i - start) * dtMs;
+    const bridges = stage.bridges || [];
+    const onBridge = j => bridges.some(([a, b]) => j >= a && j <= b);
+    const ramps = (stage.ramps || []).map(r => r.i);
+
+    // opener
+    const openKey = !driver ? 'open'
+      : driver.rank === 1 ? 'openFirst'
+      : driver.isLast ? 'openLast'
+      : driver.pos ? 'openMid' : 'open';
+    out.push({ t: 0, text: fill(pick(openKey), driver) });
+
+    let lastKind = '';
+    for (let i = Math.max(start + 1, 1); i < Math.min(end, Math.floor(path.length / 3) - 1); i++) {
+      const x = path[i * 3], y = path[i * 3 + 1], j = path[i * 3 + 2];
+      const px = path[(i - 1) * 3], py = path[(i - 1) * 3 + 1];
+      const nx2 = path[(i + 1) * 3], ny2 = path[(i + 1) * 3 + 1];
+      const step = Math.hypot(x - px, y - py);
+      const sp = step / (dtMs / 1000);
+      let turn = Math.atan2(ny2 - y, nx2 - x) - Math.atan2(y - py, x - px);
+      while (turn > Math.PI) turn -= 2 * Math.PI;
+      while (turn < -Math.PI) turn += 2 * Math.PI;
+      const curve = Math.abs(turn) / Math.max(step, 6);   // radians per pixel
+      const dir = turn < 0 ? 'L' : 'R';
+      const gap = offRoadAt(stage, x, y, j);
+      const t = rel(i);
+
+      let kind = null;
+      if (gap > 4 && onBridge(j)) kind = 'splash';
+      else if (gap > 10) kind = 'off';
+      else if (ramps.some(r => Math.abs(r - j) <= 1) && sp > 200) kind = 'jump';
+      else if (onBridge(j) && lastKind !== 'bridge') kind = 'bridge';
+      else if (curve > 0.0050) kind = 'pin' + dir;
+      else if (curve > 0.0022) kind = 'hard' + dir;
+      else if (curve > 0.0007) kind = 'easy' + dir;
+      else if (sp > 330) kind = 'fast';
+
+      if (!kind || kind === lastKind) continue;
+      // incidents always get called, scenery only if there is room
+      const urgent = kind === 'splash' || kind === 'off' || kind === 'jump';
+      if (urgent) {
+        if (out.length && t - out[out.length - 1].t < 900 && !out[out.length - 1].urgent) out.pop();
+        out.push({ t, text: fill(pick(kind), driver), urgent: true });
+        lastKind = kind;
+      } else if (say(t, fill(pick(kind), driver))) {
+        lastKind = kind;
+      }
+    }
+
+    // Events the path alone cannot show: what was eaten. Eating is the whole
+    // point of the game, so it outranks a passing description of a corner —
+    // clear the scenery out of the way rather than dropping the call.
+    for (const e of (o.events || [])) {
+      if (e.kind !== 'go' && e.kind !== 'whoa') continue;
+      const t = e.t - start * dtMs;
+      if (t < 500 || t > (end - start) * dtMs - 500) continue;
+      for (let k = out.length - 1; k >= 1; k--) {
+        if (Math.abs(out[k].t - t) < MIN_GAP && !out[k].urgent) out.splice(k, 1);
+      }
+      out.push({ t, text: fill(pick(e.kind), driver), urgent: true });
+    }
+    out.sort((a, b) => a.t - b.t);
+
+    if (driver && driver.finish && end >= Math.floor(path.length / 3) - 2) {
+      const t = (end - start) * dtMs - 400;
+      while (out.length && t - out[out.length - 1].t < MIN_GAP) out.pop();
+      out.push({ t, text: fill(pick('finish'), driver) });
+    }
+    return out;
+  }
+
   // ================================================================= GIF ====
   // GIF89a writer. Builds a palette from the colours actually used (the art is
   // flat, so a few hundred exact colours covers nearly every pixel), then LZW
@@ -316,18 +472,25 @@
 
     ctx.restore();
 
-    // caption bar
-    if (caption) {
-      ctx.fillStyle = 'rgba(35,51,31,.82)';
-      ctx.fillRect(0, H - 42, W, 42);
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '700 17px Rubik, Arial, sans-serif';
+    // caption bar: what the commentator is saying, then who we're watching
+    const commentary = sample.commentary;
+    if (caption || commentary) {
+      const barH = commentary ? 52 : 38;
+      ctx.fillStyle = 'rgba(35,51,31,.84)';
+      ctx.fillRect(0, H - barH, W, barH);
       ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillText(caption, 12, H - 27);
-      if (sub) {
+      if (commentary) {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '700 15px Rubik, Arial, sans-serif';
+        let line = commentary;
+        while (ctx.measureText(line).width > W - 22 && line.length > 4) line = line.slice(0, -2);
+        if (line !== commentary) line = line.replace(/[ ,.]+$/, '') + '…';
+        ctx.fillText(line, 11, H - barH + 15);
+      }
+      if (caption) {
         ctx.fillStyle = '#c7dcae';
-        ctx.font = '600 12px Rubik, Arial, sans-serif';
-        ctx.fillText(sub, 12, H - 11);
+        ctx.font = '700 12px Rubik, Arial, sans-serif';
+        ctx.fillText(caption + (sub ? '   ·   ' + sub : ''), 11, H - 12);
       }
     }
     // corner badge
@@ -352,6 +515,7 @@
 
     for (const seg of segments) {
       const { path, dtMs, face, caption, sub, badge } = seg;
+      const lines = seg.lines || [];
       const n = Math.floor(path.length / 3);
       const from = Math.max(0, seg.start | 0), to = Math.min(n, seg.end | 0);
       if (to - from < 2) continue;
@@ -367,13 +531,75 @@
         const heading = Math.atan2(hy, hx);
         const trail = [];
         for (let k = Math.max(from, i - 14); k <= i; k++) trail.push([path[k * 3], path[k * 3 + 1]]);
-        drawFrame(ctx, W, H, stage, { x, y, heading, trail, face, caption, sub, zoom: opts.zoom }, { badge });
+        const elapsed = (t - from) * dtMs;
+        let commentary = '';
+        for (const l of lines) {
+          if (l.t <= elapsed && elapsed - l.t < 3200) commentary = l.text;
+        }
+        drawFrame(ctx, W, H, stage, { x, y, heading, trail, face, caption, sub, commentary, zoom: opts.zoom }, { badge });
         frames.push({ data: ctx.getImageData(0, 0, W, H).data });
       }
     }
     return { frames, fps };
   }
 
+  // ---- live playback with spoken commentary (browser voice, page only) ----
+  function playClip(canvas, stage, segments, o) {
+    const opts = o || {};
+    const W = canvas.width, H = canvas.height;
+    const ctx = canvas.getContext('2d');
+    const speak = opts.speak && typeof speechSynthesis !== 'undefined';
+    let segI = 0, t0 = 0, stopped = false, spokenUpTo = -1;
+    if (speak) { try { speechSynthesis.cancel(); } catch (e) {} }
+
+    function frame(now) {
+      if (stopped) return;
+      if (!t0) t0 = now;
+      const seg = segments[segI];
+      if (!seg) { if (opts.onEnd) opts.onEnd(); return; }
+      const n = Math.floor(seg.path.length / 3);
+      const from = Math.max(0, seg.start | 0), to = Math.min(n, seg.end | 0);
+      const durMs = (to - from) * seg.dtMs;
+      const elapsed = now - t0;
+      if (elapsed >= durMs) { segI++; t0 = 0; spokenUpTo = -1; requestAnimationFrame(frame); return; }
+
+      const t = from + (to - 1 - from) * (elapsed / durMs);
+      const i = Math.min(n - 2, Math.floor(t));
+      const frac = t - i;
+      const x = seg.path[i * 3] + (seg.path[(i + 1) * 3] - seg.path[i * 3]) * frac;
+      const y = seg.path[i * 3 + 1] + (seg.path[(i + 1) * 3 + 1] - seg.path[i * 3 + 1]) * frac;
+      const heading = Math.atan2(seg.path[(i + 1) * 3 + 1] - seg.path[i * 3 + 1],
+                                 seg.path[(i + 1) * 3] - seg.path[i * 3]);
+      const trail = [];
+      for (let k = Math.max(from, i - 14); k <= i; k++) trail.push([seg.path[k * 3], seg.path[k * 3 + 1]]);
+
+      const lines = seg.lines || [];
+      let commentary = '';
+      for (let k = 0; k < lines.length; k++) {
+        const l = lines[k];
+        if (l.t <= elapsed && elapsed - l.t < 3200) commentary = l.text;
+        if (speak && l.t <= elapsed && k > spokenUpTo) {
+          spokenUpTo = k;
+          try {
+            const u = new SpeechSynthesisUtterance(l.text);
+            u.rate = 1.12; u.pitch = 1.0; u.lang = 'en-GB';
+            speechSynthesis.speak(u);
+          } catch (e) {}
+        }
+      }
+      drawFrame(ctx, W, H, stage, { x, y, heading, trail, face: seg.face,
+        caption: seg.caption, sub: seg.sub, commentary, zoom: opts.zoom }, { badge: seg.badge });
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+    return function stop() {
+      stopped = true;
+      if (speak) { try { speechSynthesis.cancel(); } catch (e) {} }
+    };
+  }
+
+  root.commentate = commentate;
+  root.playClip = playClip;
   root.pickHighlight = pickHighlight;
   root.scorePath = scorePath;
   root.encodeGif = encodeGif;

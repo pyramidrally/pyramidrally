@@ -11,7 +11,7 @@ jump the ramps, mind the rocks, and don't fall off the bridges.
 - 🌍 Daily seeded stage — identical for every player, every run (items included)
 - 🏆 Monthly championship: points for every daily, for signed-in drivers
 - 🎬 Highlight GIFs: the game finds the best few seconds of your run and encodes a shareable GIF in the browser
-- 🏁 FPRC daily reel: the leader, the pack and the last finisher, cut together on the results page
+- 🏁 FPRC daily reel: the leader, the pack and the last finisher, cut together with rally commentary
 - 🍜 20 rotating cuisines (Korean, Vietnamese, Polish, Mexican, Turkish, Caribbean…), each with its own GO/WHOA foods and one-line nutrition facts
 - 🏁 Real service-park start queue: the server marshal releases the next driver 3 s after the previous one crosses the line — no bots, only real people
 - 🚗 Momentum + grip physics: brake into corners and the tail drifts out
@@ -38,6 +38,14 @@ game scores every moment of a run — speed, how hard you were turning *while*
 fast, food eaten, jumps — slides a window over it and keeps the best few
 seconds. That window is replayed onto an offscreen canvas and encoded as a GIF
 in the browser; nothing is uploaded and no library is used.
+
+Clips carry **commentary written from the telemetry** — speed, curvature (so a
+hairpin is called a hairpin whatever speed you crawl through it at), bridges,
+going off the road, jumps and what you ate. Because every line is derived from
+what the car actually did, the commentary can never describe something that
+did not happen. Lines are burned into the clip as captions; the results page
+can also speak them aloud with the browser voice while the reel plays, though
+browsers will not let that voice be captured into the saved file.
 
 The results page builds the **FPRC reel** for a finished stage the same way,
 from the recorded lines the server keeps (the top few finishers plus the last

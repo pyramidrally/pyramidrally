@@ -62,6 +62,9 @@
   #reelBtn:disabled{opacity:.6}
   #reelOut{margin-top:12px}
   #reelOut img{width:100%;border-radius:11px;border:1px solid #dfe8d2;display:block}
+  #reelCanvas{width:100%;border-radius:11px;border:1px solid #dfe8d2;margin-top:10px;background:#c7dcae}
+  #playBtn{width:100%;margin-top:8px;background:#fff;border:2px solid var(--green);color:var(--dgreen);
+    border-radius:12px;font-family:'Rubik',sans-serif;font-weight:800;font-size:13px;padding:11px;cursor:pointer}
   #reelOut a{display:inline-block;margin-top:8px;font-size:12px;font-weight:800;color:var(--dgreen)}
   .aidisc{margin:16px auto 0;padding:11px 13px;border:1px dashed #d5e0c6;border-radius:11px;
     font-size:11px;line-height:1.65;color:#8a9880;text-align:center;background:rgba(255,255,255,.5)}
@@ -99,6 +102,11 @@
     <p>The day's reel — the leader, someone from the pack, and whoever came home last, each at their best few seconds.</p>
     <button id="reelBtn">🎬 BUILD THE REEL</button>
     <div id="reelOut"></div>
+    <canvas id="reelCanvas" width="320" height="240" style="display:none"></canvas>
+    <button id="playBtn" style="display:none">▶ PLAY WITH COMMENTARY</button>
+    <div class="note" id="speakNote" style="display:none;font-size:11px;padding:6px 0 0">
+      Commentary is spoken by your browser's own voice, so it plays here but isn't part of the saved file.
+    </div>
   </div>
 
   <div class="foot">
@@ -276,6 +284,19 @@
   }
 
   const ord = r => 'P' + r;
+  let lastReel = null, stopPlay = null;
+
+  $('playBtn').addEventListener('click', () => {
+    if (!lastReel) return;
+    const cv = $('reelCanvas');
+    if (stopPlay){ stopPlay(); stopPlay = null; $('playBtn').textContent = '▶ PLAY WITH COMMENTARY'; return; }
+    cv.style.display = '';
+    $('playBtn').textContent = '⏹ STOP';
+    stopPlay = FPRClip.playClip(cv, lastReel.stage, lastReel.segs, {
+      zoom: 0.58, speak: true,
+      onEnd: () => { stopPlay = null; $('playBtn').textContent = '▶ PLAY AGAIN'; },
+    });
+  });
   $('reelBtn').addEventListener('click', async () => {
     const btn = $('reelBtn');
     if (btn.disabled) return;
@@ -296,16 +317,25 @@
       const cv = document.createElement('canvas');
       cv.width = 320; cv.height = 240;
       const info = stageInfo(date);
-      const segs = cast.map(c => {
+      const segs = cast.map((c, k) => {
         const hl = FPRClip.pickHighlight(c.e.p, 150, 3.0);
+        const lines = FPRClip.commentate({
+          path: c.e.p, dtMs: 150, stage, start: hl.start, end: hl.end,
+          driver: {
+            name: c.e.n, rank: c.i + 1, pos: ord(c.i + 1), date: date,
+            time: (c.e.t / 1000).toFixed(2) + 's',
+            isLast: c.tag === 'LAST HOME',
+          },
+        });
         return {
           path: c.e.p, dtMs: 150, start: hl.start, end: hl.end,
-          face: c.e.f,
+          face: c.e.f, lines,
           caption: ord(c.i + 1) + ' · ' + c.e.n + ' · ' + (c.e.t / 1000).toFixed(2) + 's',
-          sub: 'SS #' + info.no + ' · ' + info.cuisine + ' · ' + date,
+          sub: 'SS #' + info.no + ' · ' + info.cuisine,
           badge: c.tag,
         };
       });
+      lastReel = { stage, segs };
       btn.textContent = 'drawing ' + segs.length + ' clips…';
       await new Promise(r => setTimeout(r, 20));
       const { frames, fps } = FPRClip.renderClip(cv, stage, segs, { fps: 10, zoom: 0.58 });
@@ -317,6 +347,8 @@
       const kb = Math.round(bytes.length / 1024);
       $('reelOut').innerHTML = '<img alt="FPRC highlights" src="' + url + '">' +
         '<a download="fprc-' + date + '.gif" href="' + url + '">⬇ save this reel (' + kb + ' KB)</a>';
+      $('playBtn').style.display = '';
+      $('speakNote').style.display = '';
       btn.textContent = original;
     } catch (e){
       $('reelOut').innerHTML = '<div class="note">Could not build the reel: ' + esc(e.message) + '</div>';
