@@ -10,6 +10,7 @@ jump the ramps, mind the rocks, and don't fall off the bridges.
 ## Features
 - 🌍 Daily seeded stage — identical for every player, every run (items included)
 - 🏆 Monthly championship: points (100…1) for every daily, for signed-in drivers
+- 💬 Optional Discord webhook: a live scoreboard that edits itself, plus final results each day
 - 🍜 20 rotating cuisines (Korean, Vietnamese, Polish, Mexican, Turkish, Caribbean…), each with its own GO/WHOA foods and one-line nutrition facts
 - 🏁 Real service-park start queue: the server marshal releases the next driver 3 s after the previous one crosses the line — no bots, only real people
 - 🚗 Momentum + grip physics: brake into corners and the tail drifts out
@@ -58,6 +59,35 @@ derived from your client id + storage token so sessions still survive restarts.
 Without `GOOGLE_CLIENT_ID` the sign-in card and championship simply stay
 hidden and everything else works exactly as before.
 
+### Discord leaderboard (optional)
+Posts to a Discord channel through a webhook — no bot process, no token, and
+nothing to keep online. That matters here: a gateway bot would spend its life
+reconnecting on a free instance that sleeps, whereas a webhook is just an
+outbound POST whenever the server happens to be awake.
+
+Two messages per stage:
+- a **live scoreboard** for the day in progress, edited in place as times come
+  in, so the channel gets one self-updating post instead of a stream of spam
+- a **final results** post when the stage closes at midnight UTC, with the
+  podium, the driver count and the current championship top five
+
+Setup:
+1. In Discord: **Server Settings → Integrations → Webhooks → New Webhook**,
+   pick the channel, then **Copy Webhook URL**
+2. On Render, add `DISCORD_WEBHOOK_URL` = that URL
+3. Also add `SITE_URL` = `https://your-site.onrender.com` so the posts can link
+   back to the stage results page
+
+Notes:
+- Updates are debounced (one edit per ~20s at most) and skipped entirely when
+  the top ten hasn't changed, so Discord's rate limits are never a concern.
+- Adding the webhook to a server that already has history does **not** dump a
+  backlog into the channel: existing days are marked as history and posting
+  begins with the next stage that closes.
+- If the instance is asleep at midnight, the final post is made the next time
+  it wakes up rather than being skipped.
+- Driver names are stripped of markdown and `@everyone`/`@here` before posting.
+
 ### Keep the leaderboard through restarts
 The board is just a small JSON file — but Render's free tier wipes the local
 disk on every sleep/redeploy. Pick ONE of these to make it survive:
@@ -89,6 +119,8 @@ free instance restarts.
 - `public/index.html` — the whole game
 - `public/codriver.html` — live pace-notes page for co-drivers
 - `public/day.html` — full leaderboard for any past stage
+- `auth.js` — Google ID token verification + stateless sessions
+- `discord.js` — webhook posting (live scoreboard + daily finals)
 
 Nutrition framing is based on NIH "We Can!" GO/SLOW/WHOA, WHO healthy-diet
 guidance, USDA MyPlate and Harvard's Nutrition Source. It's a game, not

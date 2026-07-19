@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
 const auth = require('./auth');
+const discord = require('./discord');
 
 const PORT = process.env.PORT || 3000;
 const LB_FILE = path.join(__dirname, 'leaderboard.json');
@@ -31,6 +32,36 @@ auth.configure({ clientId: GOOGLE_CLIENT_ID, sessionSecret: SESSION_SECRET });
 // the Google subject id ever leaving the server
 function pubId(sub) {
   return crypto.createHmac('sha256', SESSION_SECRET).update('pub:' + sub).digest('hex').slice(0, 10);
+}
+
+// ---------- stage identity ----------
+// The browser seeds each day from SHA-256('pyramid-' + date) and picks the
+// cuisine from word 1. Reproduced here so Discord posts can name the stage.
+// CUISINE_NAMES must stay in the same order as CUISINES in public/index.html
+// (a test compares the two).
+const CUISINE_NAMES = ['AMERICAN 🍔','INDIAN 🍛','ITALIAN 🍝','FRENCH 🥐','JAPANESE 🍱','CHINESE 🥡',
+  'KOREAN 🍲','THAI 🌶️','VIETNAMESE 🍜','MEXICAN 🌮','GREEK 🥙','SPANISH 🥘','GERMAN 🥨','POLISH 🥟',
+  'TURKISH 🧆','LEBANESE 🫓','MOROCCAN 🍲','CARIBBEAN 🥥','BRAZILIAN 🍖','BRITISH 🫖'];
+const STAGE_EPOCH = Date.UTC(2026, 0, 1);
+function seedWords(date) {
+  const h = crypto.createHash('sha256').update('pyramid-' + date, 'utf8').digest();
+  const w = [];
+  for (let i = 0; i < 8; i++) w.push(h.readUInt32BE(i * 4));
+  return w;
+}
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function stageInfo(date) {
+  const sw = seedWords(date);
+  const no = Math.floor((Date.parse(date + 'T00:00:00Z') - STAGE_EPOCH) / 86400000) + 1;
+  const cuisine = CUISINE_NAMES[Math.floor(mulberry32(sw[1])() * CUISINE_NAMES.length)];
+  return { date, no, cuisine, label: `SS #${no} · ${cuisine}` };
 }
 
 // ---------- persistent storage ----------
@@ -89,13 +120,14 @@ async function saveRemote() {
 
 // store = { boards: {date: [entry]}, users: {sub: {name, joined}}, months: {'YYYY-MM': [standing]} }
 // entry = { n: name, t: ms, p?: ghost path, f?: face, u?: google sub }
-let store = { boards: {}, users: {}, months: {} };
+let store = { boards: {}, users: {}, months: {}, discord: {} };
 function adoptStore(raw) {
   if (!raw || typeof raw !== 'object') return;
   if (raw.boards && typeof raw.boards === 'object') {
     store.boards = raw.boards;
     store.users = raw.users || {};
     store.months = raw.months || {};
+    store.discord = raw.discord || {};
   } else {
     store.boards = raw; // migrate the old shape (bare date → entries map)
   }
@@ -200,18 +232,59 @@ function worldGhost() {
 // on boot, restore from remote storage in case the local disk was wiped
 (async () => {
   const remote = await loadRemote();
-  if (!remote) return;
-  const before = Object.keys(store.boards).length;
-  const incoming = remote.boards || remote;
-  for (const day of Object.keys(incoming)) {
-    if (!store.boards[day] || store.boards[day].length < incoming[day].length) {
-      store.boards[day] = incoming[day];
+  if (remote) {
+    const before = Object.keys(store.boards).length;
+    const incoming = remote.boards || remote;
+    for (const day of Object.keys(incoming)) {
+      if (!store.boards[day] || store.boards[day].length < incoming[day].length) {
+        store.boards[day] = incoming[day];
+      }
     }
+    if (remote.users) store.users = Object.assign(remote.users, store.users);
+    if (remote.months) store.months = Object.assign({}, remote.months, store.months);
+    if (remote.discord) store.discord = Object.assign({}, remote.discord, store.discord);
+    console.log(`  Restored ${Object.keys(store.boards).length - before} day(s) from ${storageMode}`);
   }
-  if (remote.users) store.users = Object.assign(remote.users, store.users);
-  if (remote.months) store.months = Object.assign({}, remote.months, store.months);
-  console.log(`  Restored ${Object.keys(store.boards).length - before} day(s) from ${storageMode}`);
+  initDiscord(); // always: it decides for itself whether there is anything to do
 })();
+
+function initDiscord() {
+  const first = !store.discord || !store.discord.posted;
+  discord.attach(store.discord = store.discord || {});
+  if (first) {
+    // Don't dump a backlog into the channel the first time a webhook is added:
+    // treat everything already stored as history, and start from the next stage.
+    for (const d of Object.keys(store.boards)) discord.markPosted(d);
+    saveBoards();
+  }
+  postClosedStages();
+}
+setInterval(postClosedStages, 5 * 60 * 1000);
+
+// ---------- Discord ----------
+const SITE_URL = (process.env.SITE_URL || '').replace(/\/$/, '');
+discord.configure({ url: process.env.DISCORD_WEBHOOK_URL, siteUrl: SITE_URL });
+
+function livePayload() {
+  const b = board();
+  return { stage: stageInfo(today()), entries: b.slice(0, 10), total: b.length };
+}
+// Post the final table for any stage that has closed. The instance sleeps on a
+// free tier, so midnight may pass with nobody awake to notice — this runs on
+// boot and on a timer, and catches up whenever the server next wakes.
+async function postClosedStages() {
+  if (!discord.enabled()) return;
+  const t = today();
+  for (const date of Object.keys(store.boards).sort()) {
+    if (date >= t || discord.alreadyPosted(date)) continue;
+    const entries = store.boards[date] || [];
+    if (!entries.length) { discord.markPosted(date); continue; }
+    const ym = date.slice(0, 7);
+    const label = new Date(date + 'T00:00:00Z').toLocaleString('en-GB', { month: 'long', timeZone: 'UTC' }).toUpperCase();
+    const ok = await discord.postFinal(stageInfo(date), entries, entries.length, monthStandings(ym), label);
+    if (ok) saveBoards();
+  }
+}
 
 const app = express();
 app.use(express.json({ limit: '16kb' }));
@@ -466,6 +539,7 @@ wss.on('connection', (ws) => {
       if (improved) {
         broadcast({ t: 'event', msg: `🏁 ${c.name} — ${(t / 1000).toFixed(2)}s (#${rank})` }, myId);
         broadcast({ t: 'lb', lb: publicBoard() }, myId);
+        discord.scheduleLive(livePayload);
       }
       return;
     }
@@ -511,7 +585,8 @@ server.listen(PORT, () => {
   console.log(`  Play at:  http://localhost:${PORT}`);
   console.log(`  Leaderboard storage: ${storageMode === 'file' ? 'local file (resets on redeploy — see README)' : storageMode + ' (persistent)'}`);
   console.log(`  Accounts: ${auth.enabled() ? 'Google Sign-In enabled' : 'disabled (set GOOGLE_CLIENT_ID to enable)'}`);
+  console.log(`  Discord:  ${discord.enabled() ? 'webhook active' : 'disabled (set DISCORD_WEBHOOK_URL to enable)'}`);
   console.log('');
 });
 
-module.exports = { computeMonth, pointsForRank, store, adoptStore, POINTS };
+module.exports = { computeMonth, pointsForRank, store, adoptStore, POINTS, stageInfo, CUISINE_NAMES, postClosedStages, livePayload };
