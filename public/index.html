@@ -1617,9 +1617,9 @@
     });
     if (racingRows.length > 8) h += '<div class="rrow">… +' + (racingRows.length - 8) + ' more</div>';
     if (watchers.length){
-      h += '<div class="rhead" style="margin-top:8px">WATCHING: ' + watchers.length + '</div>';
+      h += '<div class="rhead" style="margin-top:8px">👀 WATCHING: ' + watchers.length + '</div>';
       watchers.slice(0, 4).forEach(w => {
-        h += '<div class="rrow watchRow">' + esc(w.n || '') + (w.id === myId ? ' (you)' : '') + '</div>';
+        h += '<div class="rrow watchRow">👀 ' + esc(w.n || '') + (w.id === myId ? ' (you)' : '') + '</div>';
       });
       if (watchers.length > 4) h += '<div class="rrow watchRow">… +' + (watchers.length - 4) + ' more</div>';
     }
