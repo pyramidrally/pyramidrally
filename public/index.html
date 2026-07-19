@@ -1920,8 +1920,47 @@
       if (score < bestScore){ bestScore = score; bi = i; }
     }
     idx = bi;
-    const dist = Math.hypot(pts[idx][0] - me.x, pts[idx][1] - me.y);
-    const onRoad = dist < widths[idx];
+    // How far off the road are we? Measure to the road SURFACE, not to the
+    // nearest centreline sample. The road is stroked along the polyline, so on
+    // a tight hairpin — where the centreline swings away between samples — the
+    // sample distance overstates the gap by up to ~30px. That made the game
+    // rule a car off the road while it was visibly on the tarmac, and where a
+    // hairpin sits on a bridge it produced a splash on solid deck.
+    // The road is stroked segment by segment at widths[i]*2, so a point is on
+    // the tarmac exactly when it lies within widths[i] of some segment i. Test
+    // that directly — and pick the segment with the smallest MARGIN, not the
+    // smallest distance, since a nearer but narrower segment must not win.
+    function surfaceAt(j){
+      let gap0 = 1e9, d0 = 1e9, w0 = widths[j];
+      for (let i = Math.max(0, j - 14); i <= Math.min(NPTS - 2, j + 14); i++){
+        const ax = pts[i][0], ay = pts[i][1];
+        const vx = pts[i + 1][0] - ax, vy = pts[i + 1][1] - ay;
+        const L2 = vx * vx + vy * vy || 1;
+        let t = ((me.x - ax) * vx + (me.y - ay) * vy) / L2;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const d = Math.hypot(ax + vx * t - me.x, ay + vy * t - me.y);
+        const gap = d - widths[i];
+        if (gap < gap0){ gap0 = gap; d0 = d; w0 = widths[i]; }
+      }
+      return [d0, w0];
+    }
+    let [dist, roadW] = surfaceAt(idx);
+
+    // The windowed search keeps progress honest around hairpins, but it also
+    // means a stranded index can never catch up on its own. Before punishing a
+    // driver for being off-course, check globally: if some other part of the
+    // track is far closer, we had simply lost track of them.
+    if (dist > roadW + 60){
+      let gBest = 1e18, gi = idx;
+      for (let i = 0; i < NPTS; i++){
+        const dx = pts[i][0] - me.x, dy = pts[i][1] - me.y;
+        const d = dx * dx + dy * dy;
+        if (d < gBest){ gBest = d; gi = i; }
+      }
+      const [gd, gw] = surfaceAt(gi);
+      if (gd < dist - 30){ idx = gi; dist = gd; roadW = gw; }
+    }
+    const onRoad = dist < roadW;
 
     // ramps: hit one grounded & fast → jump! (you fly over food and grass)
     if (me.z === 0 && me.vz === 0 && onRoad && me.speed > 180){
@@ -1957,7 +1996,7 @@
         }
       }
     }
-    if (me.z === 0 && dist > widths[idx] + 110){
+    if (me.z === 0 && dist > roadW + 110){
       burst(me.x, me.y, '#b9cfa1', 16);
       me.x = pts[idx][0]; me.y = pts[idx][1];
       me.angle = trackDir(idx); me.vx = 0; me.vy = 0;
