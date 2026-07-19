@@ -9,8 +9,9 @@ jump the ramps, mind the rocks, and don't fall off the bridges.
 
 ## Features
 - 🌍 Daily seeded stage — identical for every player, every run (items included)
-- 🏆 Monthly championship: points (100…1) for every daily, for signed-in drivers
-- 💬 Optional Discord webhook: a live scoreboard that edits itself, plus final results each day
+- 🏆 Monthly championship: points for every daily, for signed-in drivers
+- 🎬 Highlight GIFs: the game finds the best few seconds of your run and encodes a shareable GIF in the browser
+- 🏁 FPRC daily reel: the leader, the pack and the last finisher, cut together on the results page
 - 🍜 20 rotating cuisines (Korean, Vietnamese, Polish, Mexican, Turkish, Caribbean…), each with its own GO/WHOA foods and one-line nutrition facts
 - 🏁 Real service-park start queue: the server marshal releases the next driver 3 s after the previous one crosses the line — no bots, only real people
 - 🚗 Momentum + grip physics: brake into corners and the tail drifts out
@@ -30,6 +31,22 @@ npm start          # → http://localhost:3000
 ## Deploy (Render.com free tier)
 - Runtime **Node** · Build `npm install` · Start `npm start`
 - Free tier sleeps after ~15 min idle; first visitor waits ~30–50 s
+
+### Highlight clips
+Runs are already recorded for ghosts, so the same data can be replayed. The
+game scores every moment of a run — speed, how hard you were turning *while*
+fast, food eaten, jumps — slides a window over it and keeps the best few
+seconds. That window is replayed onto an offscreen canvas and encoded as a GIF
+in the browser; nothing is uploaded and no library is used.
+
+The results page builds the **FPRC reel** for a finished stage the same way,
+from the recorded lines the server keeps (the top few finishers plus the last
+one home), so the reel is a spread of the day rather than just the winner.
+
+### Link previews
+Pages carry `%SITE_URL%` placeholders which the server fills in per request
+from the host actually being used. Point a custom domain at the service and
+previews follow automatically, with nothing to edit. `SITE_URL` overrides it.
 
 ### Accounts & the monthly championship (optional)
 Signed-in drivers bank championship points from every daily stage. The curve is
@@ -58,35 +75,6 @@ derived from your client id + storage token so sessions still survive restarts.
 
 Without `GOOGLE_CLIENT_ID` the sign-in card and championship simply stay
 hidden and everything else works exactly as before.
-
-### Discord leaderboard (optional)
-Posts to a Discord channel through a webhook — no bot process, no token, and
-nothing to keep online. That matters here: a gateway bot would spend its life
-reconnecting on a free instance that sleeps, whereas a webhook is just an
-outbound POST whenever the server happens to be awake.
-
-Two messages per stage:
-- a **live scoreboard** for the day in progress, edited in place as times come
-  in, so the channel gets one self-updating post instead of a stream of spam
-- a **final results** post when the stage closes at midnight UTC, with the
-  podium, the driver count and the current championship top five
-
-Setup:
-1. In Discord: **Server Settings → Integrations → Webhooks → New Webhook**,
-   pick the channel, then **Copy Webhook URL**
-2. On Render, add `DISCORD_WEBHOOK_URL` = that URL
-3. Also add `SITE_URL` = `https://your-site.onrender.com` so the posts can link
-   back to the stage results page
-
-Notes:
-- Updates are debounced (one edit per ~20s at most) and skipped entirely when
-  the top ten hasn't changed, so Discord's rate limits are never a concern.
-- Adding the webhook to a server that already has history does **not** dump a
-  backlog into the channel: existing days are marked as history and posting
-  begins with the next stage that closes.
-- If the instance is asleep at midnight, the final post is made the next time
-  it wakes up rather than being skipped.
-- Driver names are stripped of markdown and `@everyone`/`@here` before posting.
 
 ### Keep the leaderboard through restarts
 The board is just a small JSON file — but Render's free tier wipes the local
@@ -118,9 +106,11 @@ free instance restarts.
 - `server.js` — Express + WebSocket: live positions, global daily leaderboard, start-queue marshal, crew codes, QR endpoint
 - `public/index.html` — the whole game
 - `public/codriver.html` — live pace-notes page for co-drivers
-- `public/day.html` — full leaderboard for any past stage
+- `public/day.html` — full leaderboard for any past stage, plus the FPRC reel
+- `public/clip.js` — highlight scoring, replay renderer and a dependency-free GIF89a encoder
+- `public/stage.js` — the stage generator, GENERATED from index.html by make_stage_js.py
+- `public/og.png` — link-preview image (regenerate with make_og.py)
 - `auth.js` — Google ID token verification + stateless sessions
-- `discord.js` — webhook posting (live scoreboard + daily finals)
 
 Nutrition framing is based on NIH "We Can!" GO/SLOW/WHOA, WHO healthy-diet
 guidance, USDA MyPlate and Harvard's Nutrition Source. It's a game, not

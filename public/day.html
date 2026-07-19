@@ -3,7 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FOOD PYRAMID RALLY — stage results</title>
+<title>FOOD PYRAMID RALLY — %STAGE%</title>
+<meta name="description" content="Final results for %STAGE% of Food Pyramid Rally — the daily food rally stage everyone in the world drives.">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Food Pyramid Rally">
+<meta property="og:title" content="%STAGE% — final results">
+<meta property="og:description" content="Every driver's time on this stage, and the FPRC highlight reel of the day.">
+<meta property="og:url" content="%SITE_URL%/day">
+<meta property="og:image" content="%SITE_URL%/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="%SITE_URL%/og.png">
+<meta name="theme-color" content="#2fae4e">
 <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Rubik:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
   :root{ --green:#2fae4e; --dgreen:#1c7a35; --orange:#ff8c2e; --ink:#23331f; --soft:#eef6e4; }
@@ -42,6 +54,18 @@
   .acct{color:var(--green);font-weight:800;margin-left:3px}
   .note{color:#9aa88e;font-size:13px;text-align:center;padding:16px 0}
   .foot{font-size:11px;color:#a5b199;text-align:center;margin-top:14px;line-height:1.7}
+  .reel{text-align:center}
+  .reel h3{font-family:'Archivo Black',sans-serif;font-size:15px;color:var(--dgreen);margin-bottom:4px;letter-spacing:.5px}
+  .reel p{font-size:12px;color:#7a8a6e;margin-bottom:10px;line-height:1.6}
+  #reelBtn{width:100%;background:var(--orange);border:none;color:#fff;border-radius:12px;
+    font-family:'Rubik',sans-serif;font-weight:800;font-size:14px;padding:13px;cursor:pointer}
+  #reelBtn:disabled{opacity:.6}
+  #reelOut{margin-top:12px}
+  #reelOut img{width:100%;border-radius:11px;border:1px solid #dfe8d2;display:block}
+  #reelOut a{display:inline-block;margin-top:8px;font-size:12px;font-weight:800;color:var(--dgreen)}
+  .aidisc{margin:16px auto 0;padding:11px 13px;border:1px dashed #d5e0c6;border-radius:11px;
+    font-size:11px;line-height:1.65;color:#8a9880;text-align:center;background:rgba(255,255,255,.5)}
+  .aidisc b{color:#6a7a5e}
   .spin{display:inline-block;width:16px;height:16px;border:3px solid #dfe8d2;border-top-color:var(--green);
     border-radius:50%;animation:sp .8s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
@@ -70,12 +94,25 @@
     <div id="body"><div class="note"><span class="spin"></span></div></div>
   </div>
 
+  <div class="card reel">
+    <h3>FPRC HIGHLIGHTS</h3>
+    <p>The day's reel — the leader, someone from the pack, and whoever came home last, each at their best few seconds.</p>
+    <button id="reelBtn">🎬 BUILD THE REEL</button>
+    <div id="reelOut"></div>
+  </div>
+
   <div class="foot">
     ✓ marks a signed-in driver — only their results bank championship points.<br>
     Points shown are what each position was worth on the day.
   </div>
+  <div class="aidisc">
+    🤖 <b>How this was built</b> — the code for this game was written by Anthropic's Claude models,
+    <b>Fable 5</b> and <b>Opus 4.8</b>, working from a human's design, direction and playtesting.
+  </div>
 </div>
 
+<script src="/stage.js"></script>
+<script src="/clip.js"></script>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
@@ -223,6 +260,71 @@
       drawFace(cv.getContext('2d'), j.entries[+cv.dataset.i].f);
     });
   }
+  // ---------- FPRC highlight reel ----------
+  // Picks a spread rather than just the fastest: the leader, a driver from the
+  // middle of the field, and the last one home. Recorded lines are only kept
+  // for a handful of entries, so we work with whoever we have.
+  function chooseCast(entries){
+    const withPath = entries.map((e, i) => ({ e, i })).filter(o => o.e.p && o.e.p.length > 30);
+    if (!withPath.length) return [];
+    const cast = [];
+    const take = (o, tag) => { if (o && !cast.find(c => c.i === o.i)) cast.push({ ...o, tag }); };
+    take(withPath[0], 'LEADER');
+    if (withPath.length > 2) take(withPath[Math.floor(withPath.length / 2)], 'THE PACK');
+    if (withPath.length > 1) take(withPath[withPath.length - 1], 'LAST HOME');
+    return cast.slice(0, 3);
+  }
+
+  const ord = r => 'P' + r;
+  $('reelBtn').addEventListener('click', async () => {
+    const btn = $('reelBtn');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const original = btn.textContent;
+    $('reelOut').innerHTML = '';
+    try {
+      btn.textContent = 'fetching the day…';
+      const j = await fetch('/api/day?d=' + encodeURIComponent(date) + '&clips=1').then(r => r.json());
+      const cast = chooseCast(j.entries || []);
+      if (!cast.length){
+        $('reelOut').innerHTML = '<div class="note">No recorded runs survive for this stage.</div>';
+        btn.textContent = original; btn.disabled = false; return;
+      }
+      btn.textContent = 'building the stage…';
+      await new Promise(r => setTimeout(r, 20));
+      const stage = FPRStage.buildStage(date);
+      const cv = document.createElement('canvas');
+      cv.width = 320; cv.height = 240;
+      const info = stageInfo(date);
+      const segs = cast.map(c => {
+        const hl = FPRClip.pickHighlight(c.e.p, 150, 3.0);
+        return {
+          path: c.e.p, dtMs: 150, start: hl.start, end: hl.end,
+          face: c.e.f,
+          caption: ord(c.i + 1) + ' · ' + c.e.n + ' · ' + (c.e.t / 1000).toFixed(2) + 's',
+          sub: 'SS #' + info.no + ' · ' + info.cuisine + ' · ' + date,
+          badge: c.tag,
+        };
+      });
+      btn.textContent = 'drawing ' + segs.length + ' clips…';
+      await new Promise(r => setTimeout(r, 20));
+      const { frames, fps } = FPRClip.renderClip(cv, stage, segs, { fps: 10, zoom: 0.58 });
+      btn.textContent = 'encoding…';
+      await new Promise(r => setTimeout(r, 20));
+      const bytes = FPRClip.encodeGif(frames, cv.width, cv.height, 1000 / fps, { maxColors: 96 });
+      const blob = new Blob([bytes], { type: 'image/gif' });
+      const url = URL.createObjectURL(blob);
+      const kb = Math.round(bytes.length / 1024);
+      $('reelOut').innerHTML = '<img alt="FPRC highlights" src="' + url + '">' +
+        '<a download="fprc-' + date + '.gif" href="' + url + '">⬇ save this reel (' + kb + ' KB)</a>';
+      btn.textContent = original;
+    } catch (e){
+      $('reelOut').innerHTML = '<div class="note">Could not build the reel: ' + esc(e.message) + '</div>';
+      btn.textContent = original;
+    }
+    btn.disabled = false;
+  });
+
   load();
 })();
 </script>

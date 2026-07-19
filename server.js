@@ -13,7 +13,6 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
 const auth = require('./auth');
-const discord = require('./discord');
 
 const PORT = process.env.PORT || 3000;
 const LB_FILE = path.join(__dirname, 'leaderboard.json');
@@ -36,7 +35,6 @@ function pubId(sub) {
 
 // ---------- stage identity ----------
 // The browser seeds each day from SHA-256('pyramid-' + date) and picks the
-// cuisine from word 1. Reproduced here so Discord posts can name the stage.
 // CUISINE_NAMES must stay in the same order as CUISINES in public/index.html
 // (a test compares the two).
 const CUISINE_NAMES = ['AMERICAN 🍔','INDIAN 🍛','ITALIAN 🍝','FRENCH 🥐','JAPANESE 🍱','CHINESE 🥡',
@@ -120,14 +118,13 @@ async function saveRemote() {
 
 // store = { boards: {date: [entry]}, users: {sub: {name, joined}}, months: {'YYYY-MM': [standing]} }
 // entry = { n: name, t: ms, p?: ghost path, f?: face, u?: google sub }
-let store = { boards: {}, users: {}, months: {}, discord: {} };
+let store = { boards: {}, users: {}, months: {} };
 function adoptStore(raw) {
   if (!raw || typeof raw !== 'object') return;
   if (raw.boards && typeof raw.boards === 'object') {
     store.boards = raw.boards;
     store.users = raw.users || {};
     store.months = raw.months || {};
-    store.discord = raw.discord || {};
   } else {
     store.boards = raw; // migrate the old shape (bare date → entries map)
   }
@@ -139,6 +136,7 @@ function thisMonth() { return today().slice(0, 7); }
 function board() { return (store.boards[today()] = store.boards[today()] || []); }
 
 const KEEP_DAYS = 40; // enough to always recompute the current month from source
+const CLIP_KEEP = 5;  // recorded lines kept per stage, for the daily highlight reel
 
 let saveTimer = null;
 function saveBoards() {
@@ -242,56 +240,48 @@ function worldGhost() {
     }
     if (remote.users) store.users = Object.assign(remote.users, store.users);
     if (remote.months) store.months = Object.assign({}, remote.months, store.months);
-    if (remote.discord) store.discord = Object.assign({}, remote.discord, store.discord);
     console.log(`  Restored ${Object.keys(store.boards).length - before} day(s) from ${storageMode}`);
   }
-  initDiscord(); // always: it decides for itself whether there is anything to do
 })();
 
-function initDiscord() {
-  const first = !store.discord || !store.discord.posted;
-  discord.attach(store.discord = store.discord || {});
-  if (first) {
-    // Don't dump a backlog into the channel the first time a webhook is added:
-    // treat everything already stored as history, and start from the next stage.
-    for (const d of Object.keys(store.boards)) discord.markPosted(d);
-    saveBoards();
-  }
-  postClosedStages();
-}
-setInterval(postClosedStages, 5 * 60 * 1000);
 
-// ---------- Discord ----------
+
 const SITE_URL = (process.env.SITE_URL || '').replace(/\/$/, '');
-discord.configure({ url: process.env.DISCORD_WEBHOOK_URL, siteUrl: SITE_URL });
-
-function livePayload() {
-  const b = board();
-  return { stage: stageInfo(today()), entries: b.slice(0, 10), total: b.length };
-}
-// Post the final table for any stage that has closed. The instance sleeps on a
-// free tier, so midnight may pass with nobody awake to notice — this runs on
-// boot and on a timer, and catches up whenever the server next wakes.
-async function postClosedStages() {
-  if (!discord.enabled()) return;
-  const t = today();
-  for (const date of Object.keys(store.boards).sort()) {
-    if (date >= t || discord.alreadyPosted(date)) continue;
-    const entries = store.boards[date] || [];
-    if (!entries.length) { discord.markPosted(date); continue; }
-    const ym = date.slice(0, 7);
-    const label = new Date(date + 'T00:00:00Z').toLocaleString('en-GB', { month: 'long', timeZone: 'UTC' }).toUpperCase();
-    const ok = await discord.postFinal(stageInfo(date), entries, entries.length, monthStandings(ym), label);
-    if (ok) saveBoards();
-  }
-}
 
 const app = express();
 app.use(express.json({ limit: '16kb' }));
+
+// Pages carry %SITE_URL% placeholders for their link-preview tags. Crawlers
+// don't run scripts, so these have to be absolute and correct in the HTML —
+// resolve them per request from the host actually being used, which means a
+// custom domain works the moment it is pointed here, with nothing to update.
+const pageCache = new Map();
+function servePage(file) {
+  return (req, res) => {
+    const origin = SITE_URL || (req.protocol + '://' + req.get('host'));
+    const key = file + '|' + origin;
+    let body = pageCache.get(key);
+    if (!body) {
+      body = fs.readFileSync(path.join(__dirname, 'public', file), 'utf8')
+               .split('%SITE_URL%').join(origin);
+      pageCache.set(key, body);
+    }
+    res.type('html').send(body);
+  };
+}
+app.get('/', servePage('index.html'));
+app.get('/index.html', servePage('index.html'));
+app.get('/codriver', servePage('codriver.html'));
+app.get('/day', (req, res) => {
+  const d = String(req.query.d || '');
+  const label = /^\d{4}-\d{2}-\d{2}$/.test(d) ? stageInfo(d).label + ' · ' + d : 'stage results';
+  const origin = SITE_URL || (req.protocol + '://' + req.get('host'));
+  const body = fs.readFileSync(path.join(__dirname, 'public', 'day.html'), 'utf8')
+                 .split('%SITE_URL%').join(origin)
+                 .split('%STAGE%').join(label);
+  res.type('html').send(body);
+});
 app.use(express.static(path.join(__dirname, 'public')));
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.get('/codriver', (req, res) => res.sendFile(path.join(__dirname, 'public', 'codriver.html')));
-app.get('/day', (req, res) => res.sendFile(path.join(__dirname, 'public', 'day.html')));
 
 app.get('/api/config', (req, res) => {
   res.json({ google: GOOGLE_CLIENT_ID || null, storage: storageMode, points: POINTS });
@@ -320,11 +310,14 @@ app.post('/api/login', async (req, res) => {
 app.get('/api/day', (req, res) => {
   const d = String(req.query.d || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return res.status(400).json({ error: 'bad date' });
-  const entries = (store.boards[d] || []).map((e, i) => ({
+  const withClips = req.query.clips === '1';
+  const raw = store.boards[d] || [];
+  const entries = raw.map((e, i) => ({
     n: e.n, t: e.t, f: e.f,
     a: e.u ? 1 : 0,
     pts: e.u ? (POINTS[i] || 0) : 0,
     would: POINTS[i] || 0,
+    p: withClips && e.p ? e.p : undefined,   // only when a reel is being built
   }));
   const days = Object.keys(store.boards).filter(k => (store.boards[k] || []).length).sort();
   res.json({ date: d, today: today(), entries, total: entries.length, days });
@@ -526,7 +519,7 @@ wss.on('connection', (ws) => {
       }
       b.sort((a, x) => a.t - x.t);
       b.splice(100);
-      b.forEach((e, i) => { if (i >= 3) delete e.p; });
+      b.forEach((e, i) => { if (i >= CLIP_KEEP && i !== b.length - 1) delete e.p; });
       saveBoards();
       const rank = (c.uid ? b.findIndex(e => e.u === c.uid) : b.findIndex(e => !e.u && e.n === c.name)) + 1;
       send(ws, {
@@ -539,7 +532,6 @@ wss.on('connection', (ws) => {
       if (improved) {
         broadcast({ t: 'event', msg: `🏁 ${c.name} — ${(t / 1000).toFixed(2)}s (#${rank})` }, myId);
         broadcast({ t: 'lb', lb: publicBoard() }, myId);
-        discord.scheduleLive(livePayload);
       }
       return;
     }
@@ -585,8 +577,7 @@ server.listen(PORT, () => {
   console.log(`  Play at:  http://localhost:${PORT}`);
   console.log(`  Leaderboard storage: ${storageMode === 'file' ? 'local file (resets on redeploy — see README)' : storageMode + ' (persistent)'}`);
   console.log(`  Accounts: ${auth.enabled() ? 'Google Sign-In enabled' : 'disabled (set GOOGLE_CLIENT_ID to enable)'}`);
-  console.log(`  Discord:  ${discord.enabled() ? 'webhook active' : 'disabled (set DISCORD_WEBHOOK_URL to enable)'}`);
   console.log('');
 });
 
-module.exports = { computeMonth, pointsForRank, store, adoptStore, POINTS, stageInfo, CUISINE_NAMES, postClosedStages, livePayload };
+module.exports = { computeMonth, pointsForRank, store, adoptStore, POINTS, stageInfo, CUISINE_NAMES };

@@ -4,6 +4,22 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>FOOD PYRAMID RALLY — the daily food stage</title>
+  <meta name="description" content="One rally stage a day, the same one for every player in the world, with a different cuisine each time. Eat the green foods to get lighter and faster, dodge the fryer, and race the monthly championship. Free, no install.">
+  <link rel="canonical" href="%SITE_URL%/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Food Pyramid Rally">
+  <meta property="og:title" content="Food Pyramid Rally — the daily food stage">
+  <meta property="og:description" content="One rally stage a day, identical for everyone on earth, with a new cuisine daily. Eat green to get lighter and faster, dodge the fryer. Free in your browser.">
+  <meta property="og:url" content="%SITE_URL%/">
+  <meta property="og:image" content="%SITE_URL%/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Food Pyramid Rally — painted round cars racing a winding rally stage">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Food Pyramid Rally — the daily food stage">
+  <meta name="twitter:description" content="One rally stage a day, identical worldwide. Eat green, dodge the fryer, chase the monthly championship.">
+  <meta name="twitter:image" content="%SITE_URL%/og.png">
+  <meta name="theme-color" content="#2fae4e">
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Archivo+Black&family=Rubik:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
   :root{ --green:#2fae4e; --dgreen:#1c7a35; --orange:#ff8c2e; --cream:#faf7f0; --ink:#23331f; --soft:#e8f2dd; }
@@ -176,6 +192,9 @@
   .ladder{display:block;margin:6px 0 8px;padding:7px 9px;background:#fbfdf7;border:1px solid #e2ecd6;
     border-radius:9px;font-size:11.5px;line-height:1.7;color:#5a6a4e}
   .ladder b{color:var(--dgreen)}
+  .aidisc{max-width:430px;margin:18px auto 6px;padding:11px 13px;border:1px dashed #d5e0c6;border-radius:11px;
+    font-size:11.5px;line-height:1.65;color:#8a9880;text-align:center;background:rgba(255,255,255,.45)}
+  .aidisc b{color:#6a7a5e}
   #authBox .fineprint{text-align:left}
   #gBtn{display:flex;justify-content:center;min-height:42px}
 </style>
@@ -282,6 +301,13 @@
     </div>
   </details>
   <details class="info">
+    <summary>for teachers &amp; dietitians</summary>
+    <div class="body">
+      Every stage is built around one cuisine, and every food in it is real, with a one-line fact drawn from public nutrition guidance. Players learn by racing: the greens make your car lighter and quicker, the fried and sugary ones make it heavier and clumsier — the same trade-off, made physical.<br><br>
+      It's free, needs no install or account to play, works on any phone, and everyone in the world drives the identical stage each day, so a class can compare times directly. Sources for the food facts are listed below.
+    </div>
+  </details>
+  <details class="info">
     <summary>monthly championship</summary>
     <div class="body">
       • <b>Sign in</b> (top of the menu) and every daily stage starts scoring. Anonymous runs still make the daily board — they just don't bank points.<br>
@@ -309,6 +335,11 @@
     <summary>last 5 dailies</summary>
     <div class="body" id="histBody"><span class="spin"></span></div>
   </details>
+
+  <div class="aidisc">
+    🤖 <b>How this was built</b> — the code for this game was written by Anthropic's Claude models,
+    <b>Fable 5</b> and <b>Opus 4.8</b>, working from a human's design, direction and playtesting.
+  </div>
 </div>
 
 <!-- FINISH -->
@@ -324,11 +355,14 @@
   <button class="bigbtn orange" id="retryBtn">RETRY STAGE</button>
   <button class="bigbtn ghostbtn" id="finMenuBtn">🎨 CHANGE DRIVER &amp; SETUP</button>
   <button class="bigbtn ghostbtn" id="shareBtn">📋 SHARE RESULT</button>
+  <button class="bigbtn ghostbtn" id="gifBtn">🎬 HIGHLIGHT GIF</button>
   <div class="lbTitle">TODAY'S LEADERBOARD</div>
   <div id="lbBox2"><span class="spin"></span></div>
   <div class="nextIn" id="nextIn"></div>
 </div>
 
+<script src="/stage.js"></script>
+<script src="/clip.js"></script>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
@@ -1580,6 +1614,7 @@
   let me = null, racing = false, started = false, raceT = 0, idx = 0, runT = 0, listAcc = 0, skids = [];
   let camX = 0, camY = 0, particles = [], recorded = [], recAcc = 0, posAcc = 0;
   let activeGhosts = [], cpDone = [], ateGo = 0, ateWhoa = 0, maxSize = 0, wobbleT = 0, eatenList = [], wrongWayRefIdx = 0, wrongWayT = 0;
+  let clipEvents = []; // {t, kind} — drives highlight picking, never leaves the device
   let stageExpired = false;
   const CPS = [0.25, 0.5, 0.75].map(f => Math.floor(START_I + (FINISH_I - START_I) * f));
   const decCache = {};
@@ -1629,7 +1664,7 @@
     idx = 4; camX = me.x; camY = me.y;
     racing = true; started = false; raceT = 0; runT = 0; listAcc = 0;
     particles = []; recorded = []; recAcc = 0; posAcc = 0;
-    cpDone = [false, false, false]; ateGo = 0; ateWhoa = 0; maxSize = 0; eatenList = []; wrongWayRefIdx = 0; wrongWayT = 0;
+    cpDone = [false, false, false]; ateGo = 0; ateWhoa = 0; maxSize = 0; eatenList = []; wrongWayRefIdx = 0; wrongWayT = 0; clipEvents = [];
     for (const f of foods) f.eaten = false;
     for (const wp of waters) wp.taken = false;
     skids = [];
@@ -1685,6 +1720,7 @@
     }
     f.eaten = true;
     eatenList.push({ def: f.def, go: f.go });
+    clipEvents.push({ t: raceT * 1000, kind: f.go ? 'go' : 'whoa' });
     const [emoji, name, fact] = f.def;
     if (f.go){
       ateGo++;
@@ -1806,10 +1842,68 @@
     $('finSub').innerHTML = base + `<br>🌍 You're #${rank} of ${total} in the world today`;
   }
 
+  // ---------- highlight GIF ----------
+  let gifBusy = false;
+  $('gifBtn').addEventListener('click', async () => {
+    if (gifBusy) return;
+    if (!window.FPRClip || !recorded || recorded.length < 30){
+      toast('Not enough of that run was recorded to make a clip.');
+      return;
+    }
+    gifBusy = true;
+    const btn = $('gifBtn');
+    const label = btn.textContent;
+    btn.textContent = '🎬 finding the best bit…';
+    try {
+      await new Promise(r => setTimeout(r, 30)); // let the button repaint
+      const hl = FPRClip.pickHighlight(recorded, GHOST_HZ, 4.2, clipEvents);
+      const cv = document.createElement('canvas');
+      cv.width = 320; cv.height = 240;
+      const stage = { pts, widths, normals, NPTS, bridges, START_I, FINISH_I };
+      btn.textContent = '🎬 drawing…';
+      await new Promise(r => setTimeout(r, 30));
+      const { frames, fps } = FPRClip.renderClip(cv, stage, [{
+        path: recorded, dtMs: GHOST_HZ, start: hl.start, end: hl.end,
+        face: profile.face,
+        caption: (profile.name || 'RACER') + ' · ' + fmt(lastTimeMs),
+        sub: 'SS #' + stageNo + ' · ' + cuisine.name,
+        badge: 'HIGHLIGHT',
+      }], { fps: 12, zoom: 0.6 });
+      btn.textContent = '🎬 encoding…';
+      await new Promise(r => setTimeout(r, 30));
+      const bytes = FPRClip.encodeGif(frames, cv.width, cv.height, 1000 / fps);
+      const blob = new Blob([bytes], { type: 'image/gif' });
+      const name = 'fpr-ss' + stageNo + '-' + (profile.name || 'racer').toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.gif';
+      const file = new File([blob], name, { type: 'image/gif' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })){
+        await navigator.share({ files: [file], text: 'My Food Pyramid Rally highlight — SS #' + stageNo });
+      } else {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+        toast('Highlight saved (' + Math.round(bytes.length / 1024) + ' KB)');
+      }
+    } catch (e){
+      toast('Could not build the clip: ' + e.message);
+    }
+    btn.textContent = label;
+    gifBusy = false;
+  });
+
   $('shareBtn').addEventListener('click', async () => {
     const rankTxt = lastRank ? ` · #${lastRank}` : '';
     const streakTxt = profile.streak.count > 1 ? `\n🔥 ${profile.streak.count}-day streak` : '';
-    const text = `🍏 FOOD PYRAMID RALLY · SS #${stageNo} — ${cuisine.name}\n⏱ ${fmt(lastTimeMs)} ${lastMedal}${rankTxt}\n🥗 ate ${ateGo} · 🍟 dodged ${foods.filter(f=>!f.go).length - ateWhoa}${streakTxt}`;
+    // the plate: what you actually ate, in order — the bit people recognise at
+    // a glance, the way a Wordle grid does
+    const plate = eatenList.slice(0, 14).map(e => e.def[0]).join('') || '—';
+    const dodged = foods.filter(f => !f.go).length - ateWhoa;
+    const site = (location.host && location.protocol.startsWith('http')) ? '\n' + location.host : '';
+    const text = `🍏 Food Pyramid Rally · SS #${stageNo}\n${cuisine.name}\n` +
+      `⏱ ${fmt(lastTimeMs)} ${lastMedal}${rankTxt}\n` +
+      `${plate}\n` +
+      `🥗 ${ateGo} good · 🍟 ${dodged} dodged${streakTxt}${site}`;
     try { await navigator.clipboard.writeText(text); toast('Copied to clipboard!'); }
     catch { toast(text); }
   });
@@ -1970,7 +2064,7 @@
           const lat = (me.x - px) * nx + (me.y - py) * ny;
           const a = rp.side < 0 ? -w * 0.92 : w * 0.06;
           const b = rp.side < 0 ? -w * 0.06 : w * 0.92;
-          if (lat > a && lat < b){ me.vz = 300; blip(520, 0.12); blip(700, 0.14); }
+          if (lat > a && lat < b){ me.vz = 300; blip(520, 0.12); blip(700, 0.14); clipEvents.push({ t: raceT * 1000, kind: 'jump' }); }
           break;
         }
       }
