@@ -276,7 +276,7 @@
   </div>
 
   <button class="bigbtn" id="startBtn">ENTER SERVICE PARK</button>
-  <button class="bigbtn ghostbtn" id="spectateBtn">👀 SPECTATE</button>
+  <button class="bigbtn ghostbtn" id="spectateBtn">SPECTATE</button>
 
   <div class="card">
     <div class="cardHead">today's times</div>
@@ -298,6 +298,10 @@
     <div id="monthBody"><span class="spin"></span></div>
   </div>
 
+  <details class="info" id="histBox">
+    <summary>last 5 dailies</summary>
+    <div class="body" id="histBody"><span class="spin"></span></div>
+  </details>
   <details class="info">
     <summary>how to play</summary>
     <div class="body">
@@ -308,13 +312,6 @@
       • <b>Yellow bars</b> are jump ramps (half the road) — fly over the food. 🪨 <b>Rocks</b> are real: dodge or jump them.<br>
       • <b>Bridges</b>: off the deck = splash + 1s penalty. Watch for one-lane narrows.<br>
       • ↻ restarts your run anytime — only your best finish counts.
-    </div>
-  </details>
-  <details class="info">
-    <summary>for teachers &amp; dietitians</summary>
-    <div class="body">
-      Every stage is built around one cuisine, and every food in it is real, with a one-line fact drawn from public nutrition guidance. Players learn by racing: the greens make your car lighter and quicker, the fried and sugary ones make it heavier and clumsier — the same trade-off, made physical.<br><br>
-      It's free, needs no install or account to play, works on any phone, and everyone in the world drives the identical stage each day, so a class can compare times directly. Sources for the food facts are listed below.
     </div>
   </details>
   <details class="info">
@@ -342,13 +339,9 @@
       This is a game, not medical or dietary advice.
     </div>
   </details>
-  <details class="info" id="histBox">
-    <summary>last 5 dailies</summary>
-    <div class="body" id="histBody"><span class="spin"></span></div>
-  </details>
 
   <div class="aidisc">
-    🤖 <b>How this was built</b> — the code for this game was written by Anthropic's Claude models,
+    <b>How this was built</b> — the code for this game was written by Anthropic's Claude models,
     <b>Fable 5</b> and <b>Opus 4.8</b>, working from a human's design, direction and playtesting.
   </div>
 </div>
@@ -1624,9 +1617,9 @@
     });
     if (racingRows.length > 8) h += '<div class="rrow">… +' + (racingRows.length - 8) + ' more</div>';
     if (watchers.length){
-      h += '<div class="rhead" style="margin-top:8px">👀 WATCHING: ' + watchers.length + '</div>';
+      h += '<div class="rhead" style="margin-top:8px">WATCHING: ' + watchers.length + '</div>';
       watchers.slice(0, 4).forEach(w => {
-        h += '<div class="rrow watchRow">👀 ' + esc(w.n || '') + (w.id === myId ? ' (you)' : '') + '</div>';
+        h += '<div class="rrow watchRow">' + esc(w.n || '') + (w.id === myId ? ' (you)' : '') + '</div>';
       });
       if (watchers.length > 4) h += '<div class="rrow watchRow">… +' + (watchers.length - 4) + ' more</div>';
     }
