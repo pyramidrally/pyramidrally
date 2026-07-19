@@ -203,6 +203,7 @@
   #specBar #specExit{background:rgba(255,120,100,.3)}
   #specWho{color:#fff;font-size:12.5px;font-weight:800;text-align:center;min-width:132px;line-height:1.35}
   #specWho span{display:block;font-size:10.5px;font-weight:600;color:#b9cfa1;letter-spacing:.4px}
+  .watchRow{color:#8a9880 !important;font-weight:700}
   #authBox .fineprint{text-align:left}
   #gBtn{display:flex;justify-content:center;min-height:42px}
 </style>
@@ -996,7 +997,8 @@
   const FACE_COLORS = ['#ffd23f','#ff8c2e','#7ddb6a','#5bd1ff','#ff7bac','#c9a2ff','#f5f2e8','#ffb35c'];
   const GRID = 18; // paint grid resolution
   const PAINT_COLORS = ['#23331f','#ffffff','#ff3b30','#ff8c2e','#ffd23f','#2fae4e','#5bd1ff','#c9a2ff'];
-  let profile = { name:'', face:{ color:'#ffd23f', paint:'' }, showMine:true, showWorld:true, sound:true, streak:{ last:'', count:0 } };
+  const DEFAULT_PAINT = '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001100000110000000001100000110000000001100000110000000000000000000000000000000000000000000000000000000000000010000000010000000011111111110000000001111111100000000000000000000000000000000000000000000000000000000000'; // eyes and a smile, so nobody is a blank disc
+  let profile = { name:'', face:{ color:'#ffd23f', paint: DEFAULT_PAINT }, showMine:true, showWorld:true, sound:true, streak:{ last:'', count:0 } };
   try { const p = JSON.parse(localStorage.getItem('pr-profile')); if (p) profile = Object.assign(profile, p); } catch {}
   let myGhosts = []; // [{t,p:[x,y,s,...]}], [0]=PB
   try { const g = JSON.parse(localStorage.getItem('pr-ghosts-' + dateStr)); if (g) myGhosts = g; } catch {}
@@ -1187,6 +1189,7 @@
   let session = null;
   try { session = localStorage.getItem('pr-session'); } catch {}
   const others = new Map(); // id -> {n, face, x,y,sz, tx,ty, seen}
+  let watchers = [];        // people spectating right now
   function connect(){
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     try { ws = new WebSocket(`${proto}://${location.host}`); } catch { return; }
@@ -1221,6 +1224,7 @@
         others.set(m.id, o);
       }
       if (m.t === 'bye') others.delete(m.id);
+      if (m.t === 'watchers'){ watchers = m.l || []; renderRacers(); }
       if (m.t === 'queue'){
         parkOrder = m.order || []; parkPending = m.pending;
         if (meQueued && !meReleased) renderRacers();
@@ -1602,9 +1606,13 @@
     }
     return bi;
   }
+  function sendWs(obj){
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+  }
   function renderRacers(){
     const nowP = performance.now();
-    const racingRows = [{ n: profile.name, idx, me: true }];
+    // while spectating you are not racing, so don't list yourself as on track
+    const racingRows = spectating ? [] : [{ n: profile.name, idx, me: true }];
     for (const o of others.values()){
       if (o.tx === undefined || nowP - (o.seen || 0) > 2500) continue;
       racingRows.push({ n: o.n, idx: coarseIdx(o.x, o.y) });
@@ -1615,6 +1623,13 @@
       h += '<div class="rrow' + (r0.me ? ' meRow' : '') + '">' + (i + 1) + '. ' + esc(r0.n || '') + '</div>';
     });
     if (racingRows.length > 8) h += '<div class="rrow">… +' + (racingRows.length - 8) + ' more</div>';
+    if (watchers.length){
+      h += '<div class="rhead" style="margin-top:8px">👀 WATCHING: ' + watchers.length + '</div>';
+      watchers.slice(0, 4).forEach(w => {
+        h += '<div class="rrow watchRow">👀 ' + esc(w.n || '') + (w.id === myId ? ' (you)' : '') + '</div>';
+      });
+      if (watchers.length > 4) h += '<div class="rrow watchRow">… +' + (watchers.length - 4) + ' more</div>';
+    }
     const waiting = parkOrder.filter(id => id !== myId).length + (meQueued && !meReleased ? 1 : 0);
     if (waiting > 0){
       h += '<div class="rhead" style="margin-top:8px">IN QUEUE: ' + waiting + '</div>';
@@ -2644,10 +2659,23 @@
     const t = specTarget != null ? others.get(specTarget) : null;
     const tx = t ? t.x : pts[START_I][0];
     const ty = t ? t.y : pts[START_I][1];
-    me.x += (tx - me.x) * Math.min(dt * 6, 1);
-    me.y += (ty - me.y) * Math.min(dt * 6, 1);
-    camX += (me.x - camX) * Math.min(dt * 5, 1);
-    camY += (me.y - camY) * Math.min(dt * 5, 1);
+    // ride the watched car directly: easing toward it as well as easing the
+    // camera stacked two lags on top of the network one, and felt soupy
+    me.x = tx; me.y = ty;
+    if (t && t.hd != null) me.angle = t.hd;
+    // the road is drawn in a window around idx — without this the stage is
+    // simply not rendered anywhere except near the start line
+    {
+      let best = 1e18, bi = idx;
+      for (let i = 0; i < NPTS; i++){
+        const dx = pts[i][0] - me.x, dy = pts[i][1] - me.y;
+        const d = dx * dx + dy * dy;
+        if (d < best){ best = d; bi = i; }
+      }
+      idx = bi;
+    }
+    camX += (me.x - camX) * Math.min(dt * 8, 1);
+    camY += (me.y - camY) * Math.min(dt * 8, 1);
     specAcc = (specAcc || 0) + dt;
     if (specAcc > 0.5){ specAcc = 0; updateSpecBar(); renderRacers(); }
   }
@@ -2661,6 +2689,7 @@
            vx: 0, vy: 0, size: 0, boostT: 0, slowT: 0, z: 0, vz: 0, stunT: 0, invulnT: 0, shieldT: 0 };
     camX = me.x; camY = me.y;
     idx = START_I;
+    sendWs({ t: 'spectate', on: true });
     $('menu').classList.add('hidden');
     $('specBar').classList.remove('hidden');
     $('minimap').classList.remove('hidden');
@@ -2669,6 +2698,7 @@
     updateSpecBar();
   }
   function exitSpectate(){
+    sendWs({ t: 'spectate', on: false });
     spectating = false;
     specTarget = null;
     me = null;

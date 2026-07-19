@@ -396,6 +396,15 @@ function queueSnapshot() {
   return { t: 'queue', order: marshal.queue.map(c => c.id), pending: marshal.pending ? marshal.pending.id : null };
 }
 function broadcastQueue() { broadcast(queueSnapshot()); }
+
+// Who is watching rather than driving. Sent on change rather than with every
+// live tick — it changes rarely and the live packet runs seven times a second.
+function watcherSnapshot() {
+  const l = [];
+  for (const [id, c] of clients) if (c.spectating) l.push({ id, n: c.name });
+  return { t: 'watchers', l };
+}
+function broadcastWatchers() { broadcast(watcherSnapshot()); }
 function removeFromQueue(c) {
   const before = marshal.queue.length;
   marshal.queue = marshal.queue.filter(e => e !== c);
@@ -431,7 +440,7 @@ wss.on('connection', (ws) => {
         ws, id: myId, uid,
         name: uid ? store.users[uid].name : sanitizeName(m.name),
         face: sanitizeFace(m.face), live: null,
-        crewCode: makeCrewCode(), watchers: new Set(), queueJoinT: 0,
+        crewCode: makeCrewCode(), watchers: new Set(), queueJoinT: 0, spectating: false,
       };
       clients.set(myId, c);
       crewIndex.set(c.crewCode, c);
@@ -447,6 +456,7 @@ wss.on('connection', (ws) => {
       broadcast({ t: 'roster', id: myId, n: c.name, face: c.face }, myId);
       for (const [id, o] of clients) if (id !== myId) send(ws, { t: 'roster', id, n: o.name, face: o.face });
       send(ws, queueSnapshot());
+      send(ws, watcherSnapshot());
       return;
     }
     if (m.t === 'watch') {
@@ -471,6 +481,14 @@ wss.on('connection', (ws) => {
       for (const w of c.watchers) send(w, { t: 'drv_info', n: c.name, face: c.face });
       return;
     }
+    if (m.t === 'spectate') {
+      const c = clients.get(myId);
+      if (!c) return;
+      const on = !!m.on;
+      if (c.spectating !== on) { c.spectating = on; broadcastWatchers(); }
+      return;
+    }
+
     if (m.t === 'queue_join') {
       if (!marshal.queue.includes(c) && marshal.pending !== c) {
         c.queueJoinT = Date.now();
@@ -555,8 +573,10 @@ wss.on('connection', (ws) => {
         for (const w of c.watchers) send(w, { t: 'drv_gone' });
         crewIndex.delete(c.crewCode);
       }
+      const wasSpectating = c && c.spectating;
       clients.delete(myId);
       broadcast({ t: 'bye', id: myId });
+      if (wasSpectating) broadcastWatchers();
     }
   });
 });
