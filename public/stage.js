@@ -53,8 +53,213 @@
 
   function mulberry32(a){ return function(){ a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
+  const CUISINES = [
+    { name:'AMERICAN 🍔', go:[
+        ['🥗','Cobb salad','veggies + lean protein'],
+        ['🌽','Corn on the cob','whole-grain fiber'],
+        ['🍎','Apple','fiber keeps you full longer'],
+        ['🍗','Grilled chicken','lean protein, not fried']],
+      whoa:[
+        ['🍔','Double cheeseburger','a saturated-fat overload'],
+        ['🍟','Fries','fried AND salty'],
+        ['🥤','Soda','it\u2019s basically liquid sugar'],
+        ['🍩','Donut','sugar wrapped in fried dough']] },
+    { name:'INDIAN 🍛', go:[
+        ['🫘','Dal','lentils bring protein + fiber'],
+        ['🥬','Saag','iron-rich leafy greens'],
+        ['🍗','Tandoori chicken','grilled in the oven, not fried'],
+        ['🥒','Raita','cooling probiotic yogurt']],
+      whoa:[
+        ['🥟','Samosa','deep-fried pastry pocket'],
+        ['🫓','Butter naan','refined flour soaked in butter'],
+        ['🍬','Jalebi','fried, then dunked in sugar syrup'],
+        ['🥛','Sweet lassi','a sugar-loaded drink']] },
+    { name:'ITALIAN 🍝', go:[
+        ['🍅','Pomodoro','tomatoes are full of lycopene'],
+        ['🫒','Olive oil','heart-healthy fats'],
+        ['🐟','Grilled fish','lean omega-3s'],
+        ['🥗','Caprese','fresh veg + light protein']],
+      whoa:[
+        ['🍕','Four-cheese pizza','a saturated-fat bomb'],
+        ['🍝','Alfredo pasta','cream + butter + cheese'],
+        ['🍰','Tiramisu','sugar, cream and more sugar'],
+        ['🥖','Garlic bread','white bread soaked in butter']] },
+    { name:'FRENCH 🥐', go:[
+        ['🍆','Ratatouille','a rainbow of vegetables'],
+        ['🥗','Salade niçoise','veg + eggs + fish'],
+        ['🦪','Mussels','zinc and lean protein'],
+        ['🥣','Vegetable soup','light and filling']],
+      whoa:[
+        ['🥐','Croissant','layer upon layer of butter'],
+        ['🧀','Fondue','a pot of melted cheese'],
+        ['🍮','Crème brûlée','cream topped with burnt sugar'],
+        ['🍟','Frites','fried and salty']] },
+    { name:'JAPANESE 🍱', go:[
+        ['🍣','Sashimi','lean fish, big on omega-3'],
+        ['🥗','Edamame','fiber-rich soybeans'],
+        ['🍲','Miso soup','fermented and low-calorie'],
+        ['🥦','Yasai itame','stir-fried veg, light oil']],
+      whoa:[
+        ['🍤','Tempura','battered and deep-fried'],
+        ['🍡','Dango','sweet rice dumplings in syrup'],
+        ['🍶','Sweet sake','sugar hides in the sip'],
+        ['🍥','Katsu curry','fried cutlet in a rich sauce']] },
+    { name:'CHINESE 🥡', go:[
+        ['🥬','Stir-fried bok choy','quick-cooked, nutrient-packed'],
+        ['🍤','Steamed dumplings','lighter than the fried kind'],
+        ['🍵','Oolong tea','unsweetened and antioxidant-rich'],
+        ['🍚','Brown rice','whole grain fiber']],
+      whoa:[
+        ['🍟','Sweet & sour pork','battered, fried, sugary sauce'],
+        ['🥠','Fortune cookie','mostly sugar'],
+        ['🍜','Fried noodles','oil-soaked carbs'],
+        ['🧋','Bubble tea','a sugar bomb in a cup']] },
+    { name:'KOREAN 🍲', go:[
+        ['🥬','Kimchi','fermented cabbage, gut-friendly'],
+        ['🍢','Grilled skewers','lean protein, not fried'],
+        ['🍚','Bibimbap veggies','a bowl full of colors'],
+        ['🍵','Barley tea','caffeine-free and light']],
+      whoa:[
+        ['🍗','Korean fried chicken','double-fried & glazed sweet'],
+        ['🍢','Tteokbokki','chewy cakes in sugary chili sauce'],
+        ['🍺','Sweet soju cocktails','liquid sugar and alcohol'],
+        ['🥟','Fried mandu','dumplings deep-fried']] },
+    { name:'THAI 🌶️', go:[
+        ['🥗','Som tam','shredded papaya salad, low-cal'],
+        ['🍲','Tom yum','spicy broth, light on oil'],
+        ['🦐','Grilled shrimp skewers','lean protein'],
+        ['🥦','Stir-fried greens','quick-cooked veg']],
+      whoa:[
+        ['🍛','Pad see ew','noodles soaked in oil & sugar'],
+        ['🥥','Sticky rice dessert','sugar + coconut fat combo'],
+        ['🍤','Fried spring rolls','crispy, oily wrapper'],
+        ['🧋','Thai iced tea','sweetened condensed milk overload']] },
+    { name:'VIETNAMESE 🍜', go:[
+        ['🍲','Pho broth with herbs','light and protein-rich'],
+        ['🥗','Fresh spring rolls','rice paper, not fried'],
+        ['🐟','Grilled fish','lean and simple'],
+        ['🥕','Do chua pickles','crunchy and low-calorie']],
+      whoa:[
+        ['🥖','Banh mi with pate','a rich fatty spread'],
+        ['🍤','Fried spring rolls','crispy fried shell'],
+        ['☕','Ca phe sua da','strong coffee, condensed milk sugar'],
+        ['🍮','Banh flan','caramel egg custard, sugar-heavy']] },
+    { name:'MEXICAN 🌮', go:[
+        ['🌮','Grilled fish tacos','lean protein, light toppings'],
+        ['🫘','Black beans','fiber and plant protein'],
+        ['🥑','Guacamole','healthy fats from avocado'],
+        ['🌶️','Salsa fresca','veg-based, low-calorie']],
+      whoa:[
+        ['🧀','Cheesy nachos','fried chips buried in cheese'],
+        ['🌯','Fried chimichanga','a burrito, but deep-fried'],
+        ['🍹','Frozen margarita','sugar and alcohol combined'],
+        ['🍩','Churros','fried dough rolled in sugar']] },
+    { name:'GREEK 🥙', go:[
+        ['🥙','Grilled souvlaki','lean meat, simple prep'],
+        ['🥗','Greek salad','veg, olive oil, feta'],
+        ['🫒','Olives','heart-healthy fats'],
+        ['🐙','Grilled octopus','lean seafood protein']],
+      whoa:[
+        ['🥧','Spanakopita','buttery, flaky pastry layers'],
+        ['🍯','Baklava','honey-soaked filo and nuts'],
+        ['🧀','Fried saganaki','deep-fried block of cheese'],
+        ['🥤','Sweet frappe','sugar-loaded iced coffee']] },
+    { name:'SPANISH 🥘', go:[
+        ['🐟','Grilled sardines','omega-3 rich'],
+        ['🍅','Gazpacho','cold veg soup, refreshing'],
+        ['🫒','Olive oil drizzle','good fats'],
+        ['🥗','Pan con tomate','simple bread and tomato']],
+      whoa:[
+        ['🍮','Churros con chocolate','fried dough, sugary dip'],
+        ['🥘','Fried croquetas','creamy filling, deep-fried shell'],
+        ['🍷','Sangria','wine mixed with added sugar'],
+        ['🧀','Fried Manchego bites','cheese battered and fried']] },
+    { name:'GERMAN 🥨', go:[
+        ['🥗','Light kartoffelsalat','potato salad with vinegar'],
+        ['🥬','Sauerkraut','fermented cabbage, probiotic'],
+        ['🐟','Grilled fish','lean protein classic'],
+        ['🥖','Rye bread','whole grain fiber']],
+      whoa:[
+        ['🌭','Bratwurst','processed meat, high in fat'],
+        ['🥨','Buttery pretzel','refined dough, salty butter'],
+        ['🍺','Beer','empty calories add up fast'],
+        ['🍰','Black Forest cake','cream, cherries, sugar']] },
+    { name:'POLISH 🥟', go:[
+        ['🥗','Mizeria','cucumber salad, light and fresh'],
+        ['🐟','Grilled fish','lean protein'],
+        ['🍲','Barszcz','beet soup, low-calorie'],
+        ['🥬','Fermented cabbage','gut-friendly probiotics']],
+      whoa:[
+        ['🥟','Fried pierogi','dumplings pan-fried in butter'],
+        ['🍩','Paczki','deep-fried, jam-filled doughnuts'],
+        ['🥓','Kielbasa','fatty processed sausage'],
+        ['🍰','Sernik','rich sweet cheesecake']] },
+    { name:'TURKISH 🧆', go:[
+        ['🧆','Grilled kofte','lean seasoned meat'],
+        ['🥗','Cacik','yogurt and cucumber, cool and light'],
+        ['🍆','Grilled eggplant','fiber-rich veg'],
+        ['🫘','Lentil soup','protein and fiber combo']],
+      whoa:[
+        ['🥐','Simit','a sesame ring, more bread than it looks'],
+        ['🍯','Baklava','honey-soaked filo pastry'],
+        ['🍮','Kunefe','cheese pastry drenched in syrup'],
+        ['☕','Sweet Turkish coffee','sugar stirred right in']] },
+    { name:'LEBANESE 🫓', go:[
+        ['🥙','Grilled chicken shawarma','lean protein'],
+        ['🥗','Tabbouleh','herbs and bulgur, fiber-rich'],
+        ['🫘','Hummus','chickpeas, plant protein'],
+        ['🍆','Baba ganoush','roasted eggplant dip']],
+      whoa:[
+        ['🧀','Fried kibbeh','meat and bulgur, deep-fried shell'],
+        ['🍯','Baklava','syrup-soaked pastry layers'],
+        ['🫓','Extra-oily falafel','oil-soaked chickpea balls'],
+        ['🍮','Sweet muhallabia','milk pudding heavy on sugar']] },
+    { name:'MOROCCAN 🍲', go:[
+        ['🍲','Vegetable tagine','slow-cooked veg, light oil'],
+        ['🥗','Carrot salad','fiber and vitamins'],
+        ['🐟','Grilled fish tagine','lean protein'],
+        ['🫘','Harira soup','lentils and chickpeas']],
+      whoa:[
+        ['🥮','Pastilla','flaky pastry, sugar-dusted'],
+        ['🍯','Chebakia','fried dough soaked in honey'],
+        ['☕','Sweet mint tea','loaded with sugar'],
+        ['🍟','Fried merguez','fatty spiced sausage']] },
+    { name:'CARIBBEAN 🥥', go:[
+        ['🐟','Grilled jerk fish','lean, spiced not fried'],
+        ['🥭','Fresh mango salad','vitamins and fiber'],
+        ['🫘','Rice and peas','fiber-rich plant protein'],
+        ['🥬','Callaloo greens','leafy and iron-rich']],
+      whoa:[
+        ['🍗','Deep-fried jerk chicken','crispy skin, heavy oil'],
+        ['🍞','Fried festival dumplings','fried dough'],
+        ['🍹','Rum punch','sugary and alcoholic'],
+        ['🥧','Coconut sweet bread','sugar and saturated fat']] },
+    { name:'BRAZILIAN 🍖', go:[
+        ['🍖','Grilled picanha','lean cut, simple grilling'],
+        ['🫘','Light feijoada','beans bring protein and fiber'],
+        ['🥗','Salada mista','fresh mixed salad'],
+        ['🍊','Fresh fruit plate','vitamins, natural sugar']],
+      whoa:[
+        ['🧀','Pão de queijo (many)','cheesy fried bread, easy to overeat'],
+        ['🍩','Brigadeiro','condensed milk and chocolate fudge'],
+        ['🍹','Caipirinha','sugar and alcohol mixed'],
+        ['🍟','Fried coxinha','battered, deep-fried chicken']] },
+    { name:'BRITISH 🫖', go:[
+        ['🐟','Grilled fish','lean protein classic'],
+        ['🥗','Garden salad','fresh veg'],
+        ['🍲','Vegetable soup','light and filling'],
+        ['🫘','Low-sugar baked beans','fiber and protein']],
+      whoa:[
+        ['🍟','Fish and chips','battered and deep-fried'],
+        ['🥧','Meat pie','pastry crust, heavy fat'],
+        ['🍰','Sticky toffee pudding','sugar-soaked sponge cake'],
+        ['☕','Full English fry-up','a plate of fried everything']] },
+  ];
+
+
   function buildStage(dateStr) {
     const SW = sha256Words('pyramid-' + dateStr);
+  const cuisine = CUISINES[Math.floor(mulberry32(SW[1])() * CUISINES.length)];
 const STEP = 24, NPTS = 600, START_I = 26, FINISH_I = NPTS - 10;
   let pts = [], widths = [];
   {
@@ -178,7 +383,100 @@ const STEP = 24, NPTS = 600, START_I = 26, FINISH_I = NPTS - 10;
   }
 
 
-    return { pts, widths, normals, bridges, ramps, NPTS, STEP, START_I, FINISH_I, SW };
+  // ============ foods (seeded, themed) ============
+  const foods = []; // {x,y,def:[emoji,name,fact],go:bool,eaten}
+  {
+    const r = mulberry32(SW[4]);
+    let i = START_I + 14;
+    while (i < FINISH_I - 12){
+      i += 5 + Math.floor(r() * 7);
+      if (i >= FINISH_I - 12) break;
+      const [px, py] = pts[i], [nx, ny] = normals[i], w = widths[i];
+      if (r() < 0.12 && w > 70){
+        // WHOA wall: junk across the road with one gap — squeeze through!
+        const gapLane = Math.floor(r() * 3) - 1; // -1,0,1
+        for (let lane = -1; lane <= 1; lane++){
+          if (lane === gapLane) continue;
+          const off = lane * w * 0.62;
+          const def = cuisine.whoa[Math.floor(r() * 4)];
+          foods.push({ x: px + nx * off, y: py + ny * off, def, go: false, eaten: false });
+        }
+        i += 3;
+      } else if (r() < 0.26){
+        // single WHOA food sitting right on the racing line (tempting!)
+        const off = (r() - 0.5) * w * 0.5;
+        const def = cuisine.whoa[Math.floor(r() * 4)];
+        foods.push({ x: px + nx * off, y: py + ny * off, def, go: false, eaten: false });
+      } else {
+        // GO food, slightly off the racing line — worth the detour
+        const side = r() < 0.5 ? -1 : 1;
+        const off = side * w * (0.55 + r() * 0.3);
+        const def = cuisine.go[Math.floor(r() * 4)];
+        foods.push({ x: px + nx * off, y: py + ny * off, def, go: true, eaten: false });
+      }
+    }
+  }
+
+  const decor = [], patches = [];
+  {
+    const r = mulberry32(SW[7]);
+    const flora = ['🌲','🌳','🌳','🌲','🌲','🌼','🪨','🍄','🌻','🌾'];
+    const coarse = [];
+    for (let i = 0; i < NPTS; i += 4) coarse.push(pts[i]);
+    function clearOfRoad(x, y, min){
+      for (const [px, py] of coarse){
+        const dx = px - x, dy = py - y;
+        if (dx*dx + dy*dy < min*min) return false;
+      }
+      return true;
+    }
+    // clearOfRoad() is a fast coarse filter against a fixed radius; this is the
+    // exact test — the road varies from 1 to 3 lanes wide and can loop past.
+    function onAnyRoad(x, y, margin){
+      for (let i = 0; i < NPTS; i++){
+        const dx = pts[i][0] - x, dy = pts[i][1] - y;
+        const lim = widths[i] + margin;
+        if (dx * dx + dy * dy < lim * lim) return true;
+      }
+      return false;
+    }
+    for (let i = 6; i < NPTS - 4; i += 3){
+      const [px, py] = pts[i], [nx, ny] = normals[i], w = widths[i];
+      for (const side of [-1, 1]){
+        if (r() < 0.5) continue;
+        const off = side * (w + 55 + r() * 300);
+        const x = px + nx * off, y = py + ny * off;
+        if (!clearOfRoad(x, y, 165) || onAnyRoad(x, y, 12)) continue;
+        decor.push({ x, y, e: flora[Math.floor(r() * flora.length)], s: 20 + r() * 18 });
+      }
+      if (r() < 0.25){
+        const side = r() < 0.5 ? -1 : 1;
+        const off = side * (w + 40 + r() * 380);
+        const x = px + nx * off, y = py + ny * off;
+        if (clearOfRoad(x, y, 175) && !onAnyRoad(x, y, 12)) patches.push({ x, y, r: 45 + r() * 85 });
+      }
+    }
+    // ducks paddle beside the bridge — but never on a road
+    for (const [a, b] of bridges){
+      let placed = 0;
+      for (let k = 0; k < 24 && placed < 3; k++){
+        const i = a + Math.floor(r() * Math.max(b - a, 1));
+        const [px, py] = pts[i], [nx, ny] = normals[i], w = widths[i];
+        const off = (r() < 0.5 ? -1 : 1) * (w + 45 + r() * 70);
+        const x = px + nx * off, y = py + ny * off;
+        if (onAnyRoad(x, y, 15)) continue;
+        decor.push({ x, y, e: '🦆', s: 18 });
+        placed++;
+      }
+    }
+  }
+
+  const PAR = { gold: 35, silver: 43, bronze: 56 };
+  const DNF_AT = 75;
+
+
+    return { pts, widths, normals, bridges, ramps, foods, stones, decor, patches,
+             cuisine, NPTS, STEP, START_I, FINISH_I, SW };
   }
 
   root.buildStage = buildStage;

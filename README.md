@@ -47,6 +47,10 @@ did not happen. Lines are burned into the clip as captions; the results page
 can also speak them aloud with the browser voice while the reel plays, though
 browsers will not let that voice be captured into the saved file.
 
+Clips draw the real world, not a sketch of it: the food stickers, the trees and
+grass, the rocks, and each driver's own painted car on its chassis — the same
+renderer the game uses, so a clip looks like the stage you drove.
+
 The results page builds the **FPRC reel** by casting for incident rather than
 for lap time — finishing order makes a dull reel, because the quick drivers are
 the tidy ones. Every recorded line on the stage is scanned for its best moment
@@ -121,7 +125,7 @@ free instance restarts.
 - `public/codriver.html` — live pace-notes page for co-drivers
 - `public/day.html` — full leaderboard for any past stage, plus the FPRC reel
 - `public/clip.js` — highlight scoring, replay renderer and a dependency-free GIF89a encoder
-- `public/stage.js` — the stage generator, GENERATED from index.html by make_stage_js.py
+- `public/stage.js` — stage, foods, rocks and scenery, GENERATED from index.html by make_stage_js.py
 - `public/og.png` — link-preview image (regenerate with make_og.py)
 - `auth.js` — Google ID token verification + stateless sessions
 

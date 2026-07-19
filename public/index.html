@@ -1859,7 +1859,8 @@
       const hl = FPRClip.pickHighlight(recorded, GHOST_HZ, 4.2, clipEvents);
       const cv = document.createElement('canvas');
       cv.width = 320; cv.height = 240;
-      const stage = { pts, widths, normals, NPTS, bridges, START_I, FINISH_I };
+      const stage = { pts, widths, normals, NPTS, bridges, ramps, START_I, FINISH_I,
+                      foods, stones, decor, patches };
       btn.textContent = '🎬 drawing…';
       await new Promise(r => setTimeout(r, 30));
       const lines = FPRClip.commentate({

@@ -357,13 +357,56 @@
   const PAINT_COLORS = ['#23331f', '#ffffff', '#ff3b30', '#ff8c2e', '#ffd23f', '#2fae4e', '#5bd1ff', '#c9a2ff'];
   const GRID = 18;
 
-  function drawFace(g, face, r) {
-    g.fillStyle = (face && face.color) || '#ffd23f';
+  function shade(hex, amt) {
+    const n = parseInt((hex || '#7ddb6a').replace('#', ''), 16);
+    let r0 = (n >> 16) & 255, g0 = (n >> 8) & 255, b0 = n & 255;
+    if (amt >= 0) { r0 += (255 - r0) * amt; g0 += (255 - g0) * amt; b0 += (255 - b0) * amt; }
+    else { r0 += r0 * amt; g0 += g0 * amt; b0 += b0 * amt; }
+    const cl = v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+    return '#' + cl(r0) + cl(g0) + cl(b0);
+  }
+  function rrect(g, x, y, w, h, r) {
+    g.beginPath(); g.moveTo(x + r, y);
+    g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+  }
+
+  // The same car the game draws: a painted round body on a chassis, wheels and
+  // bodywork turning with the heading while the paint stays upright.
+  function drawCar(g, face, r, heading) {
+    const f = face || {};
+    g.save();
+    const hd = (heading != null ? heading : -Math.PI / 2) + Math.PI / 2;
+    g.save(); g.rotate(hd);
+    g.fillStyle = '#2b2f2a';
+    const wx = r * 0.9, wy = r * 0.58, ww = r * 0.34, wh = r * 0.56;
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+      rrect(g, sx * wx - ww / 2, sy * wy - wh / 2, ww, wh, ww * 0.4); g.fill();
+    }
+    g.fillStyle = '#8a938a';
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+      g.beginPath(); g.arc(sx * wx, sy * wy, ww * 0.16, 0, Math.PI * 2); g.fill();
+    }
+    g.fillStyle = '#2b2f2a';
+    rrect(g, -r * 0.55, -r * 1.12, r * 1.1, r * 0.24, r * 0.1); g.fill();
+    g.fillStyle = shade(f.color, 0.65);
+    g.beginPath(); g.arc(-r * 0.34, -r * 1.0, r * 0.11, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(r * 0.34, -r * 1.0, r * 0.11, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#2b2f2a';
+    g.fillRect(-r * 0.3, r * 0.82, r * 0.12, r * 0.26);
+    g.fillRect(r * 0.18, r * 0.82, r * 0.12, r * 0.26);
+    rrect(g, -r * 0.72, r * 1.0, r * 1.44, r * 0.22, r * 0.08); g.fill();
+    g.fillStyle = shade(f.color, -0.42);
+    g.fillRect(-r * 0.6, r * 1.03, r * 0.22, r * 0.14);
+    g.fillRect(r * 0.38, r * 1.03, r * 0.22, r * 0.14);
+    g.restore();
+
+    g.fillStyle = f.color || '#ffd23f';
     g.beginPath(); g.arc(0, 0, r, 0, Math.PI * 2); g.fill();
-    const paint = (face && face.paint) || '';
+    const paint = f.paint || '';
     if (paint.length === GRID * GRID) {
       g.save();
-      g.beginPath(); g.arc(0, 0, r, 0, Math.PI * 2); g.clip();
+      g.beginPath(); g.arc(0, 0, r * 0.97, 0, Math.PI * 2); g.clip();
       const cell = (r * 2) / GRID;
       for (let i = 0; i < paint.length; i++) {
         const v = paint.charCodeAt(i) - 48;
@@ -373,11 +416,10 @@
       }
       g.restore();
     }
-    g.fillStyle = '#23331f';
-    g.beginPath(); g.arc(-r * 0.33, -r * 0.14, r * 0.1, 0, Math.PI * 2); g.fill();
-    g.beginPath(); g.arc(r * 0.33, -r * 0.14, r * 0.1, 0, Math.PI * 2); g.fill();
-    g.strokeStyle = '#23331f'; g.lineWidth = Math.max(1.2, r * 0.12); g.lineCap = 'round';
-    g.beginPath(); g.arc(0, r * 0.1, r * 0.42, 0.22 * Math.PI, 0.78 * Math.PI); g.stroke();
+    g.lineWidth = Math.max(2, r * 0.09);
+    g.strokeStyle = 'rgba(35,51,31,.55)';
+    g.beginPath(); g.arc(0, 0, r, 0, Math.PI * 2); g.stroke();
+    g.restore();
   }
 
   // draws one frame of a replay and returns nothing; caller grabs the pixels
@@ -394,6 +436,16 @@
     ctx.translate(W / 2, H * 0.56);
     ctx.scale(Z, Z);
     ctx.translate(-x, -y);
+
+    const near = (ox, oy, pad) => Math.abs(ox - x) < (W / 2) / Z + (pad || 60)
+                              && Math.abs(oy - y) < (H / 2) / Z + (pad || 60);
+
+    // grass patches, under everything
+    ctx.fillStyle = '#bcd4a0';
+    for (const p of (stage.patches || [])) {
+      if (!near(p.x, p.y, p.r)) continue;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+    }
 
     const reach = (Math.max(W, H) / Z) * 0.85;
     let lo = NPTS, hi = 0;
@@ -449,6 +501,34 @@
       ctx.stroke();
     }
 
+    // scenery, then the food itself — this is what the stage is about
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const d of (stage.decor || [])) {
+      if (!near(d.x, d.y)) continue;
+      ctx.font = d.s + 'px sans-serif';
+      ctx.fillText(d.e, d.x, d.y);
+    }
+    for (const st of (stage.stones || [])) {
+      if (!near(st.x, st.y)) continue;
+      ctx.save();
+      ctx.translate(st.x, st.y);
+      ctx.rotate(st.a || 0);
+      ctx.font = Math.round((st.s || 16) * 2.2) + 'px sans-serif';
+      ctx.fillText('🪨', 0, 0);
+      ctx.restore();
+    }
+    for (const f of (stage.foods || [])) {
+      if (!near(f.x, f.y)) continue;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(f.x, f.y, 21, 0, Math.PI * 2); ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = f.go ? '#2fae4e' : '#ff8c2e';
+      ctx.stroke();
+      ctx.font = '28px sans-serif';
+      ctx.fillStyle = '#23331f';
+      ctx.fillText(f.def[0], f.x, f.y + 2);
+    }
+
     if (trail && trail.length > 2) {
       ctx.strokeStyle = 'rgba(35,51,31,.22)';
       ctx.lineWidth = 9;
@@ -459,15 +539,15 @@
     }
 
     ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(heading + Math.PI / 2);
-    ctx.fillStyle = 'rgba(35,51,31,.30)';
-    ctx.fillRect(-26, -34, 52, 68);
+    ctx.translate(x + 5, y + 7);
+    ctx.globalAlpha = 0.18;
+    ctx.fillStyle = '#23331f';
+    ctx.beginPath(); ctx.arc(0, 0, 25, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
 
     ctx.save();
     ctx.translate(x, y);
-    drawFace(ctx, face, 24);
+    drawCar(ctx, face, 24, heading);
     ctx.restore();
 
     ctx.restore();
