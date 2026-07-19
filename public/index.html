@@ -710,6 +710,37 @@
     tickOK.push(pair);
   }
 
+  // Where to write "SERVICE PARK" / "PIT OUT". A fixed offset can't work: on
+  // some days another part of the stage loops behind the start, so pushing
+  // further from the park pushes the text onto that instead. Sample a range of
+  // offsets once and keep whichever sits furthest from any tarmac.
+  const parkLabels = (() => {
+    function clearance(x, y){
+      let m = 1e9;
+      for (let i = 0; i < NPTS; i++){
+        const dx = pts[i][0] - x, dy = pts[i][1] - y;
+        const d = Math.hypot(dx, dy) - widths[i];
+        if (d < m) m = d;
+      }
+      return m;
+    }
+    function best(bx, by, nx, ny){
+      let p = [bx - nx * 60, by - ny * 60], c0 = -1e9;
+      for (let off = 40; off <= 170; off += 10){
+        const x = bx - nx * off, y = by - ny * off;
+        const c = clearance(x, y);
+        if (c > c0){ c0 = c; p = [x, y]; }
+      }
+      return p;
+    }
+    const [ax, ay] = parkSlot(-0.9), [bx, by] = parkSlot(5.6);
+    const [tx, ty] = pts[13];
+    return {
+      park: best((ax + bx) / 2, (ay + by) / 2, normals[5][0], normals[5][1]),
+      pit: best(ax + (tx - ax) * 0.38, ay + (ty - ay) * 0.38, normals[9][0], normals[9][1]),
+    };
+  })();
+
   // ============ foods (seeded, themed) ============
   const foods = []; // {x,y,def:[emoji,name,fact],go:bool,eaten}
   {
@@ -2104,10 +2135,6 @@
         ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 4; ctx.setLineDash([12, 16]);
         ctx.beginPath(); ctx.moveTo(ax, ay); ctx.quadraticCurveTo(cx3, cy3, tx2, ty2); ctx.stroke();
         ctx.setLineDash([]);
-        ctx.font = '800 11px Rubik, sans-serif'; ctx.textAlign = 'center';
-        ctx.fillStyle = '#7a8a6e';
-        ctx.fillText('SERVICE PARK', (ax + bx2) / 2, (ay + by2) / 2 - 52);
-        ctx.fillText('PIT OUT ➜', (ax + tx2) / 2, (ay + ty2) / 2 - 38);
       }
     }
 
@@ -2162,6 +2189,25 @@
 
     drawBand(START_I, '#2fae4e', 'START');
     drawBand(FINISH_I, '#23331f', 'FINISH');
+
+    // Service park & pit lane labels — drawn AFTER the road so it can never
+    // paint over them, and pushed outward along the track normal (a fixed
+    // screen-space nudge lands on the tarmac when the stage sets off sideways).
+    {
+      const [ax, ay] = parkSlot(-0.9);
+      if (Math.abs(ax - camX) < W + 500 && Math.abs(ay - camY) < H + 500){
+        ctx.save();
+        ctx.font = '800 12px Rubik, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.lineJoin = 'round'; ctx.lineWidth = 4;
+        ctx.strokeStyle = 'rgba(255,255,255,.9)'; // halo keeps it legible on grass or asphalt
+        ctx.fillStyle = '#6a7a5e';
+        const label = (txt, p) => { ctx.strokeText(txt, p[0], p[1]); ctx.fillText(txt, p[0], p[1]); };
+        label('SERVICE PARK', parkLabels.park);
+        label('PIT OUT ➜', parkLabels.pit);
+        ctx.restore();
+      }
+    }
     // checkpoint lines
     ctx.strokeStyle = 'rgba(47,174,78,.35)'; ctx.setLineDash([8, 10]); ctx.lineWidth = 3;
     for (const cp of CPS){
