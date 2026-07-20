@@ -204,6 +204,13 @@
   #specWho{color:#fff;font-size:12.5px;font-weight:800;text-align:center;min-width:132px;line-height:1.35}
   #specWho span{display:block;font-size:10.5px;font-weight:600;color:#b9cfa1;letter-spacing:.4px}
   .watchRow{color:#8a9880 !important;font-weight:700}
+  #hlCanvas{display:none;width:100%;max-width:330px;border-radius:12px;border:1px solid #dfe8d2;
+    margin:8px auto 0;background:#c7dcae}
+  #hlActions{display:none;gap:8px;margin:8px auto 0;max-width:330px}
+  #hlActions button{flex:1;background:#fff;border:2px solid var(--green);color:var(--dgreen);
+    border-radius:11px;font-family:'Rubik',sans-serif;font-weight:800;font-size:12.5px;
+    padding:10px;cursor:pointer}
+  #hlActions button:disabled{opacity:.55}
   #authBox .fineprint{text-align:left}
   #gBtn{display:flex;justify-content:center;min-height:42px}
 </style>
@@ -365,8 +372,12 @@
   <div class="note">Food facts are simplified for the game — sources &amp; how-to are in the menu.</div>
   <button class="bigbtn orange" id="retryBtn">RETRY STAGE</button>
   <button class="bigbtn ghostbtn" id="finMenuBtn">🎨 CHANGE DRIVER &amp; SETUP</button>
-  <button class="bigbtn ghostbtn" id="shareBtn">📋 SHARE RESULT</button>
-  <button class="bigbtn ghostbtn" id="gifBtn">🎬 HIGHLIGHT GIF</button>
+  <button class="bigbtn ghostbtn" id="gifBtn">WATCH YOUR HIGHLIGHT</button>
+  <canvas id="hlCanvas" width="320" height="240"></canvas>
+  <div id="hlActions">
+    <button id="hlReplay">REPLAY</button>
+    <button id="hlShare">SHARE</button>
+  </div>
   <div class="lbTitle">TODAY'S LEADERBOARD</div>
   <div id="lbBox2"><span class="spin"></span></div>
   <div class="nextIn" id="nextIn"></div>
@@ -1656,6 +1667,9 @@
   }
   $('restartBtn').addEventListener('click', restartRun);
   function goToMenu(){
+    if (hlStop){ hlStop(); hlStop = null; }
+    $('hlCanvas').style.display = 'none';
+    $('hlActions').style.display = 'none';
     if (stageExpired) return location.reload();
     if (spectating) return exitSpectate();
     const wasRacing = racing;
@@ -1878,78 +1892,92 @@
     $('finSub').innerHTML = base + `<br>🌍 You're #${rank} of ${total} in the world today`;
   }
 
-  // ---------- highlight GIF ----------
-  let gifBusy = false;
-  $('gifBtn').addEventListener('click', async () => {
+  // ---------- your highlight, played right here ----------
+  // Downloading a GIF on a phone is a dead end, so the clip plays inline the
+  // way the daily reel does. The GIF is only encoded if you actually share.
+  let gifBusy = false, hlSegs = null, hlStop = null, hlBytes = null;
+  function hlStage(){
+    return { pts, widths, normals, NPTS, bridges, ramps, START_I, FINISH_I,
+             foods, stones, decor, patches };
+  }
+  function buildHighlight(){
+    const hl = FPRClip.pickHighlight(recorded, GHOST_HZ, 4.6, clipEvents);
+    const stage = hlStage();
+    const lines = FPRClip.commentate({
+      path: recorded, dtMs: GHOST_HZ, stage, start: hl.start, end: hl.end,
+      events: clipEvents,
+      driver: { name: profile.name || 'RACER', time: fmt(lastTimeMs), date: dateStr,
+                rank: lastRank || 0, pos: lastRank ? 'P' + lastRank : '', finish: true },
+    });
+    return { stage, segs: [{
+      path: recorded, dtMs: GHOST_HZ, start: hl.start, end: hl.end,
+      face: profile.face, lines,
+      caption: (profile.name || 'RACER') + ' · ' + fmt(lastTimeMs) + (lastRank ? ' · P' + lastRank : ''),
+      sub: 'SS #' + stageNo + ' · ' + cuisine.name,
+      badge: 'HIGHLIGHT',
+    }] };
+  }
+  function playHighlight(){
+    if (hlStop){ hlStop(); hlStop = null; }
+    $('hlCanvas').style.display = 'block';
+    $('hlActions').style.display = 'flex';
+    $('hlReplay').textContent = 'PLAYING…';
+    hlStop = FPRClip.playClip($('hlCanvas'), hlSegs.stage, hlSegs.segs, {
+      zoom: 0.6, speak: profile.sound !== false,
+      onEnd: () => { hlStop = null; $('hlReplay').textContent = 'REPLAY'; },
+    });
+  }
+  $('gifBtn').addEventListener('click', () => {
     if (gifBusy) return;
     if (!window.FPRClip || !recorded || recorded.length < 30){
       toast('Not enough of that run was recorded to make a clip.');
       return;
     }
     gifBusy = true;
-    const btn = $('gifBtn');
-    const label = btn.textContent;
-    btn.textContent = '🎬 finding the best bit…';
     try {
-      await new Promise(r => setTimeout(r, 30)); // let the button repaint
-      const hl = FPRClip.pickHighlight(recorded, GHOST_HZ, 4.2, clipEvents);
-      const cv = document.createElement('canvas');
-      cv.width = 320; cv.height = 240;
-      const stage = { pts, widths, normals, NPTS, bridges, ramps, START_I, FINISH_I,
-                      foods, stones, decor, patches };
-      btn.textContent = '🎬 drawing…';
-      await new Promise(r => setTimeout(r, 30));
-      const lines = FPRClip.commentate({
-        path: recorded, dtMs: GHOST_HZ, stage, start: hl.start, end: hl.end,
-        events: clipEvents,
-        driver: { name: profile.name || 'RACER', time: fmt(lastTimeMs), date: dateStr,
-                  rank: lastRank || 0, pos: lastRank ? 'P' + lastRank : '' },
-      });
-      const { frames, fps } = FPRClip.renderClip(cv, stage, [{
-        path: recorded, dtMs: GHOST_HZ, start: hl.start, end: hl.end,
-        face: profile.face, lines,
-        caption: (profile.name || 'RACER') + ' · ' + fmt(lastTimeMs),
-        sub: 'SS #' + stageNo + ' · ' + cuisine.name,
-        badge: 'HIGHLIGHT',
-      }], { fps: 12, zoom: 0.6 });
-      btn.textContent = '🎬 encoding…';
-      await new Promise(r => setTimeout(r, 30));
-      const bytes = FPRClip.encodeGif(frames, cv.width, cv.height, 1000 / fps);
-      const blob = new Blob([bytes], { type: 'image/gif' });
-      const name = 'fpr-ss' + stageNo + '-' + (profile.name || 'racer').toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.gif';
-      const file = new File([blob], name, { type: 'image/gif' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })){
-        await navigator.share({ files: [file], text: 'My Food Pyramid Rally highlight — SS #' + stageNo });
-      } else {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = name;
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(a.href), 8000);
-        toast('Highlight saved (' + Math.round(bytes.length / 1024) + ' KB)');
-      }
-    } catch (e){
-      toast('Could not build the clip: ' + e.message);
-    }
-    btn.textContent = label;
+      hlBytes = null;
+      hlSegs = buildHighlight();
+      playHighlight();
+      $('gifBtn').textContent = 'WATCH YOUR HIGHLIGHT';
+    } catch (e){ toast('Could not build the clip: ' + e.message); }
     gifBusy = false;
   });
-
-  $('shareBtn').addEventListener('click', async () => {
-    const rankTxt = lastRank ? ` · #${lastRank}` : '';
-    const streakTxt = profile.streak.count > 1 ? `\n🔥 ${profile.streak.count}-day streak` : '';
-    // the plate: what you actually ate, in order — the bit people recognise at
-    // a glance, the way a Wordle grid does
-    const plate = eatenList.slice(0, 14).map(e => e.def[0]).join('') || '—';
-    const dodged = foods.filter(f => !f.go).length - ateWhoa;
-    const site = (location.host && location.protocol.startsWith('http')) ? '\n' + location.host : '';
-    const text = `🍏 Food Pyramid Rally · SS #${stageNo}\n${cuisine.name}\n` +
-      `⏱ ${fmt(lastTimeMs)} ${lastMedal}${rankTxt}\n` +
-      `${plate}\n` +
-      `🥗 ${ateGo} good · 🍟 ${dodged} dodged${streakTxt}${site}`;
-    try { await navigator.clipboard.writeText(text); toast('Copied to clipboard!'); }
-    catch { toast(text); }
+  $('hlReplay').addEventListener('click', () => { if (hlSegs) playHighlight(); });
+  $('hlShare').addEventListener('click', async () => {
+    if (!hlSegs) return;
+    const btn = $('hlShare');
+    btn.disabled = true;
+    const label = btn.textContent;
+    try {
+      if (!hlBytes){
+        btn.textContent = 'rendering…';
+        await new Promise(r => setTimeout(r, 30));
+        const cv = document.createElement('canvas');
+        cv.width = 320; cv.height = 240;
+        const { frames, fps } = FPRClip.renderClip(cv, hlSegs.stage, hlSegs.segs, { fps: 11, zoom: 0.6 });
+        btn.textContent = 'encoding…';
+        await new Promise(r => setTimeout(r, 30));
+        hlBytes = { bytes: FPRClip.encodeGif(frames, cv.width, cv.height, 1000 / fps, { maxColors: 96 }) };
+      }
+      const name = 'fpr-ss' + stageNo + '-' + (profile.name || 'racer').toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.gif';
+      const file = new File([hlBytes.bytes], name, { type: 'image/gif' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })){
+        await navigator.share({ files: [file],
+          text: 'Food Pyramid Rally · SS #' + stageNo + ' — ' + fmt(lastTimeMs) });
+      } else {
+        const blob = new Blob([hlBytes.bytes], { type: 'image/gif' });
+        const a2 = document.createElement('a');
+        a2.href = URL.createObjectURL(blob);
+        a2.download = name;
+        a2.click();
+        setTimeout(() => URL.revokeObjectURL(a2.href), 8000);
+        toast('Saved (' + Math.round(hlBytes.bytes.length / 1024) + ' KB)');
+      }
+    } catch (e){ if (e && e.name !== 'AbortError') toast('Share failed: ' + e.message); }
+    btn.textContent = label;
+    btn.disabled = false;
   });
+
   function dayInfo(ds){
     const sw = sha256Words('pyramid-' + ds);
     const cu = CUISINES[Math.floor(mulberry32(sw[1])() * CUISINES.length)];

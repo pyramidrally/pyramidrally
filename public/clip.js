@@ -68,6 +68,46 @@
     return { start: bestStart, end: bestStart + win, score: best };
   }
 
+  // ============================================================== jumps ====
+  // Recorded lines are [x, y, idx] — flat. The car's height was never stored,
+  // so a replay showed a car driving straight over a ramp while the commentary
+  // called the air. Rather than change what is stored (and orphan every line
+  // already saved), the flight is reconstructed from the same rule the game
+  // uses: cross a ramp on the road above 180 px/s and you launch at 300, under
+  // gravity of 950. That is the game's own physics, so the arc matches.
+  const JUMP_V0 = 300, JUMP_G = 950;
+  const JUMP_MS = (2 * JUMP_V0 / JUMP_G) * 1000;
+
+  function findJumps(path, dtMs, stage) {
+    const ramps = (stage.ramps || []).map(r => r.i);
+    if (!ramps.length) return [];
+    const n = Math.floor(path.length / 3);
+    const out = [];
+    let busyUntil = -1;
+    for (let i = 1; i < n; i++) {
+      const t = i * dtMs;
+      if (t < busyUntil) continue;
+      const j = path[i * 3 + 2];
+      const step = Math.hypot(path[i * 3] - path[(i - 1) * 3], path[i * 3 + 1] - path[(i - 1) * 3 + 1]);
+      const sp = step / (dtMs / 1000);
+      if (sp > 180 && ramps.some(r => Math.abs(r - j) <= 1)) {
+        out.push(t);
+        busyUntil = t + JUMP_MS;
+      }
+    }
+    return out;
+  }
+  // height at a moment, in the game's units
+  function heightAt(jumps, tMs) {
+    for (let k = 0; k < jumps.length; k++) {
+      const dt = (tMs - jumps[k]) / 1000;
+      if (dt < 0 || dt > JUMP_MS / 1000) continue;
+      const z = JUMP_V0 * dt - 0.5 * JUMP_G * dt * dt;
+      if (z > 0) return z;
+    }
+    return 0;
+  }
+
   // ========================================================== commentary ====
   // Rally commentary written from the telemetry, so it can only ever describe
   // something that actually happened: how fast, how hard they were turning and
@@ -491,6 +531,27 @@
         ctx.fill();
       }
     }
+    // jump ramps — the yellow bar and its arrow
+    for (const rp of (stage.ramps || [])) {
+      if (rp.i < lo || rp.i > hi) continue;
+      const [rnx, rny] = normals[rp.i], rw = widths[rp.i], rp0 = pts[rp.i];
+      const a = rp.side < 0 ? -0.92 : 0.06, b = rp.side < 0 ? -0.06 : 0.92;
+      ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 16;
+      ctx.beginPath();
+      ctx.moveTo(rp0[0] + rnx * rw * a, rp0[1] + rny * rw * a);
+      ctx.lineTo(rp0[0] + rnx * rw * b, rp0[1] + rny * rw * b);
+      ctx.stroke();
+      const mid = (a + b) / 2;
+      const nj = Math.min(rp.i + 1, NPTS - 1);
+      const dir = Math.atan2(pts[nj][1] - rp0[1], pts[nj][0] - rp0[0]);
+      ctx.save();
+      ctx.translate(rp0[0] + rnx * rw * mid, rp0[1] + rny * rw * mid);
+      ctx.rotate(dir);
+      ctx.fillStyle = '#ff8c2e';
+      ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(-7, -11); ctx.lineTo(-7, 11); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+
     // finish banner
     if (FINISH_I >= lo && FINISH_I <= hi) {
       const [nx, ny] = normals[FINISH_I], w = widths[FINISH_I];
@@ -538,16 +599,21 @@
       ctx.stroke();
     }
 
+    const z = sample.z || 0;
     ctx.save();
     ctx.translate(x + 5, y + 7);
-    ctx.globalAlpha = 0.18;
+    ctx.globalAlpha = z > 0 ? 0.26 : 0.18;
     ctx.fillStyle = '#23331f';
-    ctx.beginPath(); ctx.arc(0, 0, 25, 0, Math.PI * 2); ctx.fill();
+    const shr = z > 0 ? 24 * 0.95 : 25;
+    ctx.beginPath();
+    if (z > 0) ctx.ellipse(0, 0, shr, shr * 0.55, 0, 0, Math.PI * 2);
+    else ctx.arc(0, 0, shr, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
 
     ctx.save();
-    ctx.translate(x, y);
-    drawCar(ctx, face, 24, heading);
+    ctx.translate(x, y - z * 0.55);
+    drawCar(ctx, face, 24 * (1 + z / 450), heading);
     ctx.restore();
 
     ctx.restore();
@@ -596,6 +662,7 @@
     for (const seg of segments) {
       const { path, dtMs, face, caption, sub, badge } = seg;
       const lines = seg.lines || [];
+      const jumps = findJumps(path, dtMs, stage);
       const n = Math.floor(path.length / 3);
       const from = Math.max(0, seg.start | 0), to = Math.min(n, seg.end | 0);
       if (to - from < 2) continue;
@@ -612,11 +679,12 @@
         const trail = [];
         for (let k = Math.max(from, i - 14); k <= i; k++) trail.push([path[k * 3], path[k * 3 + 1]]);
         const elapsed = (t - from) * dtMs;
+        const z = heightAt(jumps, t * dtMs);
         let commentary = '';
         for (const l of lines) {
           if (l.t <= elapsed && elapsed - l.t < 3200) commentary = l.text;
         }
-        drawFrame(ctx, W, H, stage, { x, y, heading, trail, face, caption, sub, commentary, zoom: opts.zoom }, { badge });
+        drawFrame(ctx, W, H, stage, { x, y, heading, trail, face, caption, sub, commentary, z, zoom: opts.zoom }, { badge });
         frames.push({ data: ctx.getImageData(0, 0, W, H).data });
       }
     }
@@ -637,6 +705,7 @@
       if (!t0) t0 = now;
       const seg = segments[segI];
       if (!seg) { if (opts.onEnd) opts.onEnd(); return; }
+      if (!seg._jumps) seg._jumps = findJumps(seg.path, seg.dtMs, stage);
       const n = Math.floor(seg.path.length / 3);
       const from = Math.max(0, seg.start | 0), to = Math.min(n, seg.end | 0);
       const durMs = (to - from) * seg.dtMs;
@@ -668,7 +737,8 @@
         }
       }
       drawFrame(ctx, W, H, stage, { x, y, heading, trail, face: seg.face,
-        caption: seg.caption, sub: seg.sub, commentary, zoom: opts.zoom }, { badge: seg.badge });
+        caption: seg.caption, sub: seg.sub, commentary,
+        z: heightAt(seg._jumps, t * seg.dtMs), zoom: opts.zoom }, { badge: seg.badge });
       requestAnimationFrame(frame);
     }
     requestAnimationFrame(frame);
@@ -792,6 +862,8 @@
     return cast;
   }
 
+  root.findJumps = findJumps;
+  root.heightAt = heightAt;
   root.analyseRun = analyseRun;
   root.buildCast = buildCast;
   root.MOMENTS = MOMENTS;

@@ -10,7 +10,7 @@ jump the ramps, mind the rocks, and don't fall off the bridges.
 ## Features
 - 🌍 Daily seeded stage — identical for every player, every run (items included)
 - 🏆 Monthly championship: points for every daily, for signed-in drivers
-- 🎬 Highlight GIFs: the game finds the best few seconds of your run and encodes a shareable GIF in the browser
+- 🎬 Highlights: the game finds the best few seconds of your run and plays it back with commentary; sharing encodes a GIF on the spot
 - 👀 Spectator mode: watch anyone currently on the stage, cycling between them
 - ⌨️ Backspace restarts a run for keyboard players
 - 🏁 FPRC daily reel: the leader, the pack and the last finisher, cut together with rally commentary
