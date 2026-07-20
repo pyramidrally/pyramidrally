@@ -1564,6 +1564,25 @@
   let meQueued = false, meReleased = false, meJoinT = 0;
   let parkOrder = [], parkPending = null; // ids, from the server's queue snapshot
 
+  // Water is painted as a wide stroke along each bridge span, so "am I over
+  // the river" is a question about position, not about progress.
+  const WATER_HALF = 190;   // matches the 380px stroke the water is drawn with
+  function overWater(x, y){
+    for (const [a, b] of bridges){
+      const s = Math.max(a - 2, 0), e = Math.min(b + 2, NPTS - 1);
+      for (let i = s; i < e; i++){
+        const ax = pts[i][0], ay = pts[i][1];
+        const vx = pts[i + 1][0] - ax, vy = pts[i + 1][1] - ay;
+        const L2 = vx * vx + vy * vy || 1;
+        let u = ((x - ax) * vx + (y - ay) * vy) / L2;
+        u = u < 0 ? 0 : u > 1 ? 1 : u;
+        const dx = ax + vx * u - x, dy = ay + vy * u - y;
+        if (dx * dx + dy * dy < WATER_HALF * WATER_HALF) return true;
+      }
+    }
+    return false;
+  }
+
   function trackDir(i){
     const a = pts[Math.max(0, i - 1)], b = pts[Math.min(NPTS - 1, i + 1)];
     return Math.atan2(b[1] - a[1], b[0] - a[0]);
@@ -2173,8 +2192,11 @@
       blip(220, 0.25, 'square');
       foodToast('🚧 OFF COURSE — back on the track!', true);
     }
-    // bridges: drive off the edge → splash & restart from the deck
-    if (me.z === 0 && !onRoad && onBridge(idx)){
+    // Bridges: drive off the edge → splash. This used to ask whether the
+    // PROGRESS INDEX was on a bridge, which a hairpin defeats — the nearest
+    // track point out over the river can be the approach segment, leaving a
+    // band of water you could drive on freely. Ask the water instead.
+    if (me.z === 0 && !onRoad && overWater(me.x, me.y)){
       burst(me.x, me.y, '#5bd1ff', 22);
       me.x = pts[idx][0]; me.y = pts[idx][1];
       me.angle = trackDir(idx); me.vx = 0; me.vy = 0;
@@ -2344,7 +2366,7 @@
     for (const [a, b] of bridges){
       const s = Math.max(a - 2, lo), e = Math.min(b + 2, hi);
       if (s >= e) continue;
-      ctx.strokeStyle = '#a5d9ec'; ctx.lineWidth = 380;
+      ctx.strokeStyle = '#a5d9ec'; ctx.lineWidth = WATER_HALF * 2; // physics reads the same number
       ctx.beginPath();
       for (let i = s; i <= e; i++) i === s ? ctx.moveTo(pts[i][0], pts[i][1]) : ctx.lineTo(pts[i][0], pts[i][1]);
       ctx.stroke();
