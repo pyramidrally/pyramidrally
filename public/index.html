@@ -1901,21 +1901,25 @@
              foods, stones, decor, patches };
   }
   function buildHighlight(){
-    const hl = FPRClip.pickHighlight(recorded, GHOST_HZ, 4.6, clipEvents);
     const stage = hlStage();
-    const lines = FPRClip.commentate({
-      path: recorded, dtMs: GHOST_HZ, stage, start: hl.start, end: hl.end,
-      events: clipEvents,
-      driver: { name: profile.name || 'RACER', time: fmt(lastTimeMs), date: dateStr,
-                rank: lastRank || 0, pos: lastRank ? 'P' + lastRank : '', finish: true },
-    });
-    return { stage, segs: [{
-      path: recorded, dtMs: GHOST_HZ, start: hl.start, end: hl.end,
-      face: profile.face, lines,
-      caption: (profile.name || 'RACER') + ' · ' + fmt(lastTimeMs) + (lastRank ? ' · P' + lastRank : ''),
+    // two moments of five seconds each: one window is too thin to be a clip
+    const moments = FPRClip.pickMoments(recorded, GHOST_HZ, stage,
+      { seconds: 5, count: 2, events: clipEvents });
+    const who = profile.name || 'RACER';
+    return { stage, segs: moments.map(m => ({
+      path: recorded, dtMs: GHOST_HZ, start: m.start, end: m.end,
+      face: profile.face,
+      lines: FPRClip.commentate({
+        path: recorded, dtMs: GHOST_HZ, stage, start: m.start, end: m.end,
+        events: clipEvents,
+        driver: { name: who, time: fmt(lastTimeMs), date: dateStr,
+                  rank: lastRank || 0, pos: lastRank ? 'P' + lastRank : '',
+                  finish: m.end >= Math.floor(recorded.length / 3) - 2 },
+      }),
+      caption: who + ' · ' + fmt(lastTimeMs) + (lastRank ? ' · P' + lastRank : ''),
       sub: 'SS #' + stageNo + ' · ' + cuisine.name,
-      badge: 'HIGHLIGHT',
-    }] };
+      badge: m.badge,
+    })) };
   }
   function playHighlight(){
     if (hlStop){ hlStop(); hlStop = null; }

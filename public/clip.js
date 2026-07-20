@@ -108,6 +108,49 @@
     return 0;
   }
 
+  // ============================================================== eating ====
+  // Recorded lines don't say which food was taken, so a replay left every
+  // sticker sitting on the track while the car drove through it. Replay the
+  // game's own pickup rule instead: while below z 12, anything within
+  // (BASE_R + size*5 + 14) is eaten, greens shrink you and the fryer grows you.
+  // That gives back both the vanishing food and the car's size over time.
+  const BASE_R = 15;
+
+  function simulateEating(path, dtMs, stage, jumps) {
+    const foods = stage.foods || [];
+    const n = Math.floor(path.length / 3);
+    const eatenAt = new Float64Array(foods.length).fill(-1);
+    const sizeAt = new Float64Array(n);
+    let size = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i * dtMs;
+      const x = path[i * 3], y = path[i * 3 + 1];
+      if (heightAt(jumps, t) <= 12) {
+        const r = BASE_R + size * 5 + 14;
+        const r2 = r * r;
+        // check the whole step, not just the sample, or fast cars fly through
+        const px = i > 0 ? path[(i - 1) * 3] : x, py = i > 0 ? path[(i - 1) * 3 + 1] : y;
+        const vx = x - px, vy = y - py;
+        const L2 = vx * vx + vy * vy || 1;
+        for (let k = 0; k < foods.length; k++) {
+          if (eatenAt[k] >= 0) continue;
+          const f = foods[k];
+          let u = ((f.x - px) * vx + (f.y - py) * vy) / L2;
+          u = u < 0 ? 0 : u > 1 ? 1 : u;
+          const dx = px + vx * u - f.x, dy = py + vy * u - f.y;
+          if (dx * dx + dy * dy < r2) {
+            eatenAt[k] = t;
+            size = f.go ? Math.max(0, size - 1) : Math.min(4, size + 1);
+          }
+        }
+      }
+      sizeAt[i] = size;
+    }
+    let maxSize = 0, maxAt = 0;
+    for (let i = 0; i < n; i++) if (sizeAt[i] > maxSize) { maxSize = sizeAt[i]; maxAt = i; }
+    return { eatenAt, sizeAt, maxSize, maxAt };
+  }
+
   // ========================================================== commentary ====
   // Rally commentary written from the telemetry, so it can only ever describe
   // something that actually happened: how fast, how hard they were turning and
@@ -149,6 +192,9 @@
                 "Straight through the good stuff."],
     whoa:      ["Oh, into the fryer — that'll cost them.",
                 "Picks up something heavy there.", "That's the wrong thing to eat."],
+    heavy:     ["Carrying a full load now — look at the size of it.",
+                "That car has eaten everything on the stage, and it shows.",
+                "Wallowing through here, absolutely stuffed."],
     finish:    ["Across the line — {t}.", "And that's the stage done. {t}.",
                 "Takes the flag in {t}."],
   };
@@ -186,7 +232,8 @@
                             .replace('{p}', (d && d.pos) || '')
                             .replace('{t}', (d && d.time) || '');
     const out = [];
-    const MIN_GAP = 1900;                       // don't talk over yourself
+    const MIN_GAP = 1900;   // don't talk over yourself
+    const MIN_HOLD = 1200;  // and leave every line up long enough to read
     const say = (t, text) => {
       if (out.length && t - out[out.length - 1].t < MIN_GAP) return false;
       out.push({ t, text });
@@ -234,8 +281,15 @@
       // incidents always get called, scenery only if there is room
       const urgent = kind === 'splash' || kind === 'off' || kind === 'jump';
       if (urgent) {
-        if (out.length && t - out[out.length - 1].t < 900 && !out[out.length - 1].urgent) out.pop();
-        out.push({ t, text: fill(pick(kind), driver), urgent: true });
+        // an incident interrupts scenery, but never so fast that the previous
+        // line flashes past unread — push it back instead
+        const prev = out[out.length - 1];
+        let at = t;
+        if (prev && t - prev.t < MIN_HOLD){
+          if (prev.urgent) at = prev.t + MIN_HOLD;
+          else out.pop();
+        }
+        out.push({ t: at, text: fill(pick(kind), driver), urgent: true });
         lastKind = kind;
       } else if (say(t, fill(pick(kind), driver))) {
         lastKind = kind;
@@ -255,6 +309,9 @@
       out.push({ t, text: fill(pick(e.kind), driver), urgent: true });
     }
     out.sort((a, b) => a.t - b.t);
+    for (let i = 1; i < out.length; i++) {
+      if (out[i].t - out[i - 1].t < MIN_HOLD) out[i].t = out[i - 1].t + MIN_HOLD;
+    }
 
     if (driver && driver.finish && end >= Math.floor(path.length / 3) - 2) {
       const t = (end - start) * dtMs - 400;
@@ -578,8 +635,12 @@
       ctx.fillText('🪨', 0, 0);
       ctx.restore();
     }
-    for (const f of (stage.foods || [])) {
+    const eatenAt = sample.eatenAt;
+    for (let fi = 0; fi < (stage.foods || []).length; fi++) {
+      const f = stage.foods[fi];
       if (!near(f.x, f.y)) continue;
+      // gone once this driver took it
+      if (eatenAt && eatenAt[fi] >= 0 && sample.tMs >= eatenAt[fi]) continue;
       ctx.fillStyle = '#ffffff';
       ctx.beginPath(); ctx.arc(f.x, f.y, 21, 0, Math.PI * 2); ctx.fill();
       ctx.lineWidth = 3;
@@ -611,9 +672,10 @@
     ctx.fill();
     ctx.restore();
 
+    const carR = (BASE_R + (sample.size || 0) * 5) * 1.6;   // clips run a bigger car
     ctx.save();
     ctx.translate(x, y - z * 0.55);
-    drawCar(ctx, face, 24 * (1 + z / 450), heading);
+    drawCar(ctx, face, carR * (1 + z / 450), heading);
     ctx.restore();
 
     ctx.restore();
@@ -663,6 +725,7 @@
       const { path, dtMs, face, caption, sub, badge } = seg;
       const lines = seg.lines || [];
       const jumps = findJumps(path, dtMs, stage);
+      const ate = simulateEating(path, dtMs, stage, jumps);
       const n = Math.floor(path.length / 3);
       const from = Math.max(0, seg.start | 0), to = Math.min(n, seg.end | 0);
       if (to - from < 2) continue;
@@ -679,12 +742,15 @@
         const trail = [];
         for (let k = Math.max(from, i - 14); k <= i; k++) trail.push([path[k * 3], path[k * 3 + 1]]);
         const elapsed = (t - from) * dtMs;
-        const z = heightAt(jumps, t * dtMs);
+        const tMs = t * dtMs;
+        const z = heightAt(jumps, tMs);
         let commentary = '';
         for (const l of lines) {
           if (l.t <= elapsed && elapsed - l.t < 3200) commentary = l.text;
         }
-        drawFrame(ctx, W, H, stage, { x, y, heading, trail, face, caption, sub, commentary, z, zoom: opts.zoom }, { badge });
+        drawFrame(ctx, W, H, stage, { x, y, heading, trail, face, caption, sub, commentary, z,
+          tMs, eatenAt: ate.eatenAt, size: ate.sizeAt[Math.min(ate.sizeAt.length - 1, i)],
+          zoom: opts.zoom }, { badge });
         frames.push({ data: ctx.getImageData(0, 0, W, H).data });
       }
     }
@@ -705,7 +771,10 @@
       if (!t0) t0 = now;
       const seg = segments[segI];
       if (!seg) { if (opts.onEnd) opts.onEnd(); return; }
-      if (!seg._jumps) seg._jumps = findJumps(seg.path, seg.dtMs, stage);
+      if (!seg._jumps){
+        seg._jumps = findJumps(seg.path, seg.dtMs, stage);
+        seg._ate = simulateEating(seg.path, seg.dtMs, stage, seg._jumps);
+      }
       const n = Math.floor(seg.path.length / 3);
       const from = Math.max(0, seg.start | 0), to = Math.min(n, seg.end | 0);
       const durMs = (to - from) * seg.dtMs;
@@ -738,7 +807,10 @@
       }
       drawFrame(ctx, W, H, stage, { x, y, heading, trail, face: seg.face,
         caption: seg.caption, sub: seg.sub, commentary,
-        z: heightAt(seg._jumps, t * seg.dtMs), zoom: opts.zoom }, { badge: seg.badge });
+        z: heightAt(seg._jumps, t * seg.dtMs), tMs: t * seg.dtMs,
+        eatenAt: seg._ate.eatenAt,
+        size: seg._ate.sizeAt[Math.min(seg._ate.sizeAt.length - 1, i)],
+        zoom: opts.zoom }, { badge: seg.badge });
       requestAnimationFrame(frame);
     }
     requestAnimationFrame(frame);
@@ -756,6 +828,7 @@
   // cast is picked for variety of incident rather than for lap time.
   const MOMENTS = {
     splash:   { badge: 'SPLASH!',   weight: 3.4 },
+    heavy:    { badge: 'FULLY LOADED', weight: 1.1, dailyOnly: true },
     air:      { badge: 'BIG AIR',   weight: 2.8 },
     off:      { badge: 'OFF ROAD',  weight: 2.0 },
     sideways: { badge: 'SIDEWAYS',  weight: 1.7 },
@@ -773,6 +846,8 @@
     const bridges = stage.bridges || [];
     const onBridge = j => bridges.some(([a, b]) => j >= a && j <= b);
     const ramps = (stage.ramps || []).map(r => r.i);
+    const jumps = findJumps(path, dtMs, stage);
+    const ate = simulateEating(path, dtMs, stage, jumps);
 
     for (let i = 1; i < n - 1; i++) {
       const x = path[i * 3], y = path[i * 3 + 1], j = path[i * 3 + 2];
@@ -791,6 +866,9 @@
       if (ramps.some(r => Math.abs(r - j) <= 1) && sp > 200) per.air[i] += 5;
       if (curve > 0.0035 && sp > 150) per.sideways[i] += curve * 400 * Math.min(sp / 300, 1.4);
       if (sp > 320) per.charge[i] += (sp - 320) / 90;
+      // waddling round fully loaded is funny, but it lasts for whole seconds
+      // while a splash is instantaneous — keep the per-sample value tiny
+      if (ate.sizeAt[i] >= 3) per.heavy[i] += (ate.sizeAt[i] - 2) * 0.09;
     }
 
     const best = {};
@@ -809,6 +887,37 @@
     let winner = null;
     for (const k of kinds) if (!winner || best[k].score > winner.score) winner = best[k];
     return { best, winner, hasMoment: winner && winner.raw > 0.9 };
+  }
+
+  // Your own highlight: the best couple of moments rather than one window, so
+  // a clip has some shape. Windows must not overlap, and they play in the order
+  // they happened, not in order of how good they were.
+  function pickMoments(path, dtMs, stage, o) {
+    const opts = o || {};
+    const seconds = opts.seconds || 5;
+    const count = opts.count || 2;
+    const a = analyseRun(path, dtMs, stage, seconds);
+    const picked = [];
+    if (a) {
+      const ranked = Object.keys(a.best)
+        .filter(k => !MOMENTS[k].dailyOnly)      // that one is for the daily reel
+        .map(k => a.best[k])
+        .filter(m => m.raw > 0.9)
+        .sort((p, q) => q.score - p.score);
+      for (const m of ranked) {
+        if (picked.length >= count) break;
+        if (picked.some(x => m.start < x.end && m.end > x.start)) continue;
+        picked.push({ start: m.start, end: m.end, kind: m.kind,
+                      badge: (MOMENTS[m.kind] || {}).badge || 'HIGHLIGHT' });
+      }
+    }
+    // a clean run has no incidents — fall back to the plain best window
+    if (!picked.length) {
+      const hl = pickHighlight(path, dtMs, seconds, opts.events);
+      picked.push({ start: hl.start, end: hl.end, kind: 'charge', badge: 'HIGHLIGHT' });
+    }
+    picked.sort((p, q) => p.start - q.start);
+    return picked;
   }
 
   // entries: [{ name, time, face, path, rank, isLast }] in finishing order
@@ -838,33 +947,41 @@
     const leader = analysed.find(o2 => o2.e.rank === 1);
     if (leader) add(leader, leader.a.winner.kind, 'LEADER');
 
+    // hold the sign-off back so filling up on categories can't squeeze it out
+    const lastHome = analysed.find(o2 => o2.e.isLast && !used.has(o2.e));
+    if (lastHome) used.add(lastHome.e);
+    const room = target - (lastHome ? 1 : 0);
+
     // then the strongest moment of each kind, so the reel keeps changing shape
     for (const kind of Object.keys(MOMENTS)) {
+      if (cast.length >= room) break;
       const ranked = analysed.filter(o2 => !used.has(o2.e) && o2.a.best[kind].raw > 0.9)
                              .sort((p, q) => q.a.best[kind].raw - p.a.best[kind].raw);
       if (ranked.length) add(ranked[0], kind);
-      if (cast.length >= target - 1) break;
     }
 
-    // whoever came home last gets the sign-off
-    const last = analysed.find(o2 => o2.e.isLast && !used.has(o2.e));
-    if (last && cast.length < target) add(last, last.a.winner.kind, 'LAST HOME');
-
     // still short? fill with the best remaining moments of any kind
-    if (cast.length < target) {
+    if (cast.length < room) {
       const rest = analysed.filter(o2 => !used.has(o2.e))
                            .sort((p, q) => q.a.winner.score - p.a.winner.score);
       for (const o2 of rest) {
-        if (cast.length >= target) break;
+        if (cast.length >= room) break;
         add(o2, o2.a.winner.kind);
       }
+    }
+    // and the last one home closes the reel
+    if (lastHome) {
+      used.delete(lastHome.e);
+      add(lastHome, lastHome.a.winner.kind, 'LAST HOME');
     }
     return cast;
   }
 
+  root.simulateEating = simulateEating;
   root.findJumps = findJumps;
   root.heightAt = heightAt;
   root.analyseRun = analyseRun;
+  root.pickMoments = pickMoments;
   root.buildCast = buildCast;
   root.MOMENTS = MOMENTS;
   root.commentate = commentate;
