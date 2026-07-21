@@ -1685,6 +1685,8 @@
     const a = pts[Math.max(0, i - 1)], b = pts[Math.min(NPTS - 1, i + 1)];
     return Math.atan2(b[1] - a[1], b[0] - a[0]);
   }
+  // The apron's geometry — called with fractional k to size the painted area,
+  // so this stays a plain straight line.
   function parkSlot(k){
     const i = 5;
     const [px, py] = pts[i], [nx, ny] = normals[i];
@@ -1693,6 +1695,29 @@
     return [
       px + nx * -(widths[i] + 62) - (dxv / L) * (k * 46),
       py + ny * -(widths[i] + 62) - (dyv / L) * (k * 46),
+      trackDir(6),
+    ];
+  }
+
+  // Where a WAITING CAR actually stands. A single file worked for three or four
+  // and then ran off the end of the apron and off the screen. Only the first
+  // few get a bay; everyone behind them waits together in the holding area, in
+  // a tidy block, and moves up as bays free. Their place in the queue is
+  // unaffected — this is only where they stand.
+  const PARK_BAYS = 4;
+  function parkSpot(k){
+    if (k < PARK_BAYS) return parkSlot(k);
+    const i = 5;
+    const [px, py] = pts[i], [nx, ny] = normals[i];
+    const dxv = pts[8][0] - pts[2][0], dyv = pts[8][1] - pts[2][1];
+    const L = Math.hypot(dxv, dyv) || 1;
+    const j = Math.round(k) - PARK_BAYS;
+    const col = j % 3, row = Math.floor(j / 3) % 4;   // wraps rather than escapes
+    const along = PARK_BAYS * 46 + 24 + row * 27;
+    const across = (col - 1) * 33;
+    return [
+      px + nx * (-(widths[i] + 62) + across) - (dxv / L) * along,
+      py + ny * (-(widths[i] + 62) + across) - (dyv / L) * along,
       trackDir(6),
     ];
   }
@@ -1852,7 +1877,7 @@
     skids = [];
     joinQueue();
     { // spawn parked in your queue slot (position updates live as others join/leave)
-      const [sx, sy, sa] = parkSlot(myQueuePosition());
+      const [sx, sy, sa] = parkSpot(myQueuePosition());
       me.x = sx; me.y = sy; me.angle = sa;
     }
     for (const k of Object.keys(decCache)) delete decCache[k];
@@ -2249,7 +2274,7 @@
     if (meQueued && !meReleased){
       checkSoloFallback(now);
       const ahead = myQueuePosition();
-      const [sx, sy, sa] = parkSlot(ahead);
+      const [sx, sy, sa] = parkSpot(ahead);
       me.x = sx; me.y = sy; me.angle = sa;
       me.vx = 0; me.vy = 0; me.speed = 0;
       $('rollHint').textContent = ahead > 0 ? ('🅿 SERVICE PARK — ' + ahead + ' AHEAD OF YOU') : "🅿 YOU'RE NEXT — WAIT FOR THE MARSHAL…";
@@ -2554,7 +2579,7 @@
     {
       const [ax, ay] = parkSlot(-0.9);
       if (Math.abs(ax - camX) < W + 500 && Math.abs(ay - camY) < H + 500){
-        const [bx2, by2] = parkSlot(5.6);
+        const [bx2, by2] = parkSlot(7.4);
         const [tx2, ty2] = pts[13];
         const cx3 = (ax + tx2) / 2 + normals[9][0] * -40;
         const cy3 = (ay + ty2) / 2 + normals[9][1] * -40;
@@ -2803,13 +2828,31 @@
       ctx.fillText(o.n || '', o.x, o.y - (BASE_R + (o.sz||0)*5) - 9);
     }
 
+    // a note over the holding area, so a huddle of cars reads as a queue
+    {
+      const queued = parkOrder.length + (meQueued && !meReleased && parkOrder.indexOf(myId) < 0 ? 1 : 0);
+      if (queued > PARK_BAYS){
+        const [hx, hy] = parkSpot(PARK_BAYS + 1);
+        if (Math.abs(hx - camX) < W / 2 + 120 && Math.abs(hy - camY) < H / 2 + 120){
+          ctx.save();
+          ctx.font = '800 12px Rubik, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#3d5233';
+          ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 3;
+          const msg = 'HOLDING — ' + (queued - PARK_BAYS) + ' waiting';
+          ctx.strokeText(msg, hx, hy - 46);
+          ctx.fillText(msg, hx, hy - 46);
+          ctx.restore();
+        }
+      }
+    }
     // other real players waiting in the service park
     {
       let slot = parkPending ? 1 : 0; // slot 0 stays clear for whoever was just released
       for (const id of parkOrder){
         if (id === myId) { slot++; continue; }
         const o = others.get(id);
-        const [px, py, pa] = parkSlot(slot);
+        const [px, py, pa] = parkSpot(slot);
         slot++;
         if (!o) continue;
         const pdx = px - camX, pdy = py - camY;
