@@ -351,7 +351,11 @@ app.get('/day', (req, res) => {
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/config', (req, res) => {
-  res.json({ google: GOOGLE_CLIENT_ID || null, storage: storageMode, points: POINTS });
+  // commentary reports WHETHER a key is set, never the key itself, so a
+  // deploy can be checked from a browser
+  res.json({ google: GOOGLE_CLIENT_ID || null, storage: storageMode, points: POINTS,
+             commentary: ai.enabled() ? 'ai' : 'built-in',
+             commentaryModel: ai.enabled() ? ai.MODEL : null });
 });
 
 // exchange a Google ID token for one of our sessions
