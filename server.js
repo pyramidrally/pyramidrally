@@ -661,7 +661,10 @@ function liveCount() {
 setInterval(() => {
   const list = [];
   for (const [id, c] of clients) if (c.live) list.push([id, c.live.x, c.live.y, c.live.sz]);
-  if (clients.size) broadcast({ t: 'live', l: list, racing: list.length });
+  // s: when this snapshot was taken. Clients place positions on THIS timeline
+  // rather than on arrival time, so network jitter doesn't become visible
+  // wobble in how the cars move.
+  if (clients.size) broadcast({ t: 'live', l: list, racing: list.length, s: Date.now() });
 }, 140);
 
 setInterval(() => {

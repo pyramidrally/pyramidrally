@@ -1202,7 +1202,8 @@
   let authEnabled = false, signedIn = false, myPubId = null;
   let session = null;
   try { session = localStorage.getItem('pr-session'); } catch {}
-  const others = new Map(); // id -> {n, face, x,y,sz, tx,ty, seen}
+  const others = new Map(); // id -> {n, face, x,y,sz, tx,ty, seen, buf}
+  let clockOffset = null;   // performance.now() minus the server's Date.now()
   let watchers = [];        // people spectating right now
   function connect(){
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -1247,11 +1248,25 @@
       if (m.t === 'live'){
         $('liveNow').innerHTML = `<span class="dot"></span>${m.racing} racing now`;
         const now = performance.now();
+        // Put snapshots on the SERVER's clock, shifted into ours. Timestamping
+        // by arrival would bake network jitter into the motion; the smallest
+        // observed gap is the closest thing to a true offset, so track that.
+        if (m.s){
+          const gap = now - m.s;
+          clockOffset = (clockOffset === null) ? gap : Math.min(clockOffset + 0.02, gap);
+        }
+        const stamp = m.s ? m.s + (clockOffset === null ? 0 : clockOffset) : now;
         for (const [id, x, y, sz] of m.l){
           if (id === myId) continue;
           const o = others.get(id) || { n: '???', face: { color:'#7ddb6a', paint:'' }, x, y };
           o.tx = x; o.ty = y; o.sz = sz; o.seen = now;
           if (o.x === undefined){ o.x = x; o.y = y; }
+          if (!o.buf) o.buf = [];
+          const last = o.buf[o.buf.length - 1];
+          if (!last || stamp > last.t){
+            o.buf.push({ t: stamp, x, y, sz });
+            if (o.buf.length > 16) o.buf.shift();
+          }
           others.set(id, o);
         }
       }
@@ -2426,7 +2441,7 @@
     camX += (me.x - camX) * Math.min(dt * 5, 1);
     camY += (me.y - camY) * Math.min(dt * 5, 1);
 
-    lerpOthers(dt);
+    lerpOthers(dt, now);
 
     for (const p of particles){ p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
     particles = particles.filter(p => p.life > 0);
@@ -2783,15 +2798,66 @@
     ctx.restore();
   }
 
-  // smooth other cars toward their latest server position — needed while
-  // racing AND while spectating, so it lives outside update()
-  function lerpOthers(dt){
+  // Other cars used to ease toward their last known position. That is always
+  // chasing: positions arrive every ~140ms, a car covers 60px in that time, and
+  // an exponential ease decelerates into each target then lurches when the next
+  // one lands. It reads as lag even on a perfect connection.
+  //
+  // Instead, keep a short history and draw the world very slightly in the past —
+  // one and a half packets is enough. Then there is always a snapshot on either
+  // side of the moment being drawn, so the car moves at a steady speed between
+  // two positions it genuinely occupied. Smooth by construction.
+  //
+  // The delay is ~200ms, not seconds: any longer and what you watch stops
+  // agreeing with the running order beside it.
+  const INTERP_DELAY = 210;
+  const MAX_EXTRAP = 220;   // if packets stop, carry on briefly, then hold
+
+  function sampleBuffer(buf, at){
+    if (!buf || !buf.length) return null;
+    if (buf.length === 1) return { x: buf[0].x, y: buf[0].y, hd: null };
+    if (at <= buf[0].t) return { x: buf[0].x, y: buf[0].y, hd: null };
+    const last = buf[buf.length - 1];
+    if (at >= last.t){
+      // ran off the end: keep the last known speed for a moment
+      const prev = buf[buf.length - 2];
+      const span = last.t - prev.t;
+      const over = Math.min(at - last.t, MAX_EXTRAP);
+      if (span <= 0) return { x: last.x, y: last.y, hd: null };
+      const k = over / span;
+      const dx = last.x - prev.x, dy = last.y - prev.y;
+      return { x: last.x + dx * k, y: last.y + dy * k,
+               hd: (dx * dx + dy * dy > 1) ? Math.atan2(dy, dx) : null };
+    }
+    for (let i = buf.length - 1; i > 0; i--){
+      const a = buf[i - 1], b = buf[i];
+      if (at >= a.t && at <= b.t){
+        const span = b.t - a.t;
+        const k = span > 0 ? (at - a.t) / span : 0;
+        // Straight-line between the two snapshots. A Catmull-Rom curve through
+        // the neighbours was tried and measured WORSE — it assumes evenly
+        // spaced points, and the fallbacks at the ends of the buffer put kinks
+        // in the motion. What is left is chord error across one packet, which
+        // is set by the packet rate, not by the maths.
+        const dx = b.x - a.x, dy = b.y - a.y;
+        return { x: a.x + dx * k, y: a.y + dy * k,
+                 hd: (dx * dx + dy * dy > 1) ? Math.atan2(dy, dx) : null };
+      }
+    }
+    return { x: last.x, y: last.y, hd: null };
+  }
+
+  function lerpOthers(dt, nowMs){
+    const at = (nowMs === undefined ? performance.now() : nowMs) - INTERP_DELAY;
     for (const o of others.values()){
-      if (o.tx === undefined) continue;
-      const mvx = (o.tx - o.x) * Math.min(dt * 8, 1);
-      const mvy = (o.ty - o.y) * Math.min(dt * 8, 1);
-      o.x += mvx; o.y += mvy;
-      if (mvx * mvx + mvy * mvy > 0.4) o.hd = Math.atan2(mvy, mvx);
+      const s = sampleBuffer(o.buf, at);
+      if (!s){
+        if (o.tx === undefined) continue;
+        o.x = o.tx; o.y = o.ty;
+        continue;
+      }
+      o.x = s.x; o.y = s.y;
+      if (s.hd !== null) o.hd = s.hd;
     }
   }
 
@@ -2832,7 +2898,7 @@
   }
   function updateSpectate(dt, now){
     if (!me) return;
-    lerpOthers(dt);
+    lerpOthers(dt, now);
     const list = liveList();
     if (specTarget != null && !others.has(specTarget)) specTarget = null;
     if (specTarget == null && list.length) specStep(0);
