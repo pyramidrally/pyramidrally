@@ -836,9 +836,7 @@
     const opts = o || {};
     const W = canvas.width, H = canvas.height;
     const ctx = canvas.getContext('2d');
-    const speak = opts.speak && typeof speechSynthesis !== 'undefined';
-    let segI = 0, t0 = 0, stopped = false, spokenUpTo = -1;
-    if (speak) { try { speechSynthesis.cancel(); } catch (e) {} }
+    let segI = 0, t0 = 0, stopped = false;
 
     function frame(now) {
       if (stopped) return;
@@ -853,7 +851,7 @@
       const from = Math.max(0, seg.start | 0), to = Math.min(n, seg.end | 0);
       const durMs = (to - from) * seg.dtMs;
       const elapsed = now - t0;
-      if (elapsed >= durMs) { segI++; t0 = 0; spokenUpTo = -1; requestAnimationFrame(frame); return; }
+      if (elapsed >= durMs) { segI++; t0 = 0;  requestAnimationFrame(frame); return; }
 
       const t = from + (to - 1 - from) * (elapsed / durMs);
       const i = Math.min(n - 2, Math.floor(t));
@@ -870,14 +868,6 @@
       for (let k = 0; k < lines.length; k++) {
         const l = lines[k];
         if (l.t <= elapsed && elapsed - l.t < 3200) commentary = l.text;
-        if (speak && l.t <= elapsed && k > spokenUpTo) {
-          spokenUpTo = k;
-          try {
-            const u = new SpeechSynthesisUtterance(l.text);
-            u.rate = 1.12; u.pitch = 1.0; u.lang = 'en-GB';
-            speechSynthesis.speak(u);
-          } catch (e) {}
-        }
       }
       drawFrame(ctx, W, H, stage, { x, y, heading, trail, face: seg.face,
         caption: seg.caption, sub: seg.sub, commentary,
@@ -890,7 +880,6 @@
     requestAnimationFrame(frame);
     return function stop() {
       stopped = true;
-      if (speak) { try { speechSynthesis.cancel(); } catch (e) {} }
     };
   }
 

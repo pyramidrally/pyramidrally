@@ -99,7 +99,6 @@
   #hudButtons{position:fixed;top:58px;left:50%;transform:translateX(-50%);z-index:7;display:flex;gap:6px}
   #hudButtons button{background:rgba(255,255,255,.88);border:2px solid #c8d8b8;border-radius:11px;
     font-size:13px;font-weight:800;padding:5px 9px;cursor:pointer}
-  #muteBtn{color:#7a8a6e}
   #restartBtn{color:var(--dgreen)}
   #homeBtn{color:#7a8a6e;font-size:13px}
   #controls{position:fixed;bottom:0;left:0;right:0;height:96px;display:flex;z-index:5}
@@ -230,7 +229,6 @@
 <div id="hudButtons">
   <button id="homeBtn" class="hidden">☰ MENU</button>
   <button id="restartBtn" class="hidden">↻</button>
-  <button id="muteBtn" class="hidden">🔊</button>
 </div>
 <div id="rollHint" class="hidden">ROLL TO THE START LINE ➜</div>
 <div id="delta"></div>
@@ -283,7 +281,6 @@
   <div class="togglerow">
     <button class="tog on" id="togMine">MY GHOSTS</button>
     <button class="tog on" id="togWorld">WORLD BEST</button>
-    <button class="tog on" id="togSound">SOUND</button>
   </div>
 
   <button class="bigbtn" id="startBtn">ENTER SERVICE PARK</button>
@@ -1061,7 +1058,7 @@
   const GRID = 18; // paint grid resolution
   const PAINT_COLORS = ['#23331f','#ffffff','#ff3b30','#ff8c2e','#ffd23f','#2fae4e','#5bd1ff','#c9a2ff'];
   const DEFAULT_PAINT = '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001100000110000000001100000110000000001100000110000000000000000000000000000000000000000000000000000000000000010000000010000000011111111110000000001111111100000000000000000000000000000000000000000000000000000000000'; // eyes and a smile, so nobody is a blank disc
-  let profile = { name:'', face:{ color:'#ffd23f', paint: DEFAULT_PAINT }, showMine:true, showWorld:true, sound:true, streak:{ last:'', count:0 } };
+  let profile = { name:'', face:{ color:'#ffd23f', paint: DEFAULT_PAINT }, showMine:true, showWorld:true, streak:{ last:'', count:0 } };
   try { const p = JSON.parse(localStorage.getItem('pr-profile')); if (p) profile = Object.assign(profile, p); } catch {}
   let myGhosts = []; // [{t,p:[x,y,s,...]}], [0]=PB
   try { const g = JSON.parse(localStorage.getItem('pr-ghosts-' + dateStr)); if (g) myGhosts = g; } catch {}
@@ -1229,16 +1226,10 @@
   renderPreview();
 
   function setTog(el, on){ el.classList.toggle('on', on); }
-  setTog($('togMine'), profile.showMine); setTog($('togWorld'), profile.showWorld); setTog($('togSound'), profile.sound);
+  setTog($('togMine'), profile.showMine); setTog($('togWorld'), profile.showWorld);
   $('togMine').addEventListener('click', () => { profile.showMine = !profile.showMine; setTog($('togMine'), profile.showMine); saveProfile(); });
   $('togWorld').addEventListener('click', () => { profile.showWorld = !profile.showWorld; setTog($('togWorld'), profile.showWorld); saveProfile(); });
-  $('togSound').addEventListener('click', () => { profile.sound = !profile.sound; setTog($('togSound'), profile.sound); saveProfile(); });
 
-  $('muteBtn').addEventListener('click', () => {
-    profile.sound = !profile.sound; $('muteBtn').textContent = profile.sound ? '🔊' : '🔇'; saveProfile();
-    if (!profile.sound){ stopEngine(); stopCrowd(); }
-    else if (racing){ startEngine(); startCrowd(); }
-  });
   function updateStreakLabel(){
     const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
     const active = profile.streak.last === dateStr || profile.streak.last === y;
@@ -1493,103 +1484,9 @@
   function esc(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
   function fmt(ms){ return (ms / 1000).toFixed(2) + 's'; }
 
-  // ============ sounds ============
-  let audio = null, engOsc = null, engFilt = null, engGain = null;
-  function startEngine(){
-    if (!profile.sound || engOsc) return;
-    try {
-      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
-      audio.resume();
-      engOsc = audio.createOscillator(); engOsc.type = 'sawtooth';
-      engFilt = audio.createBiquadFilter(); engFilt.type = 'lowpass'; engFilt.frequency.value = 620;
-      engGain = audio.createGain(); engGain.gain.value = 0.09;
-      engOsc.connect(engFilt); engFilt.connect(engGain); engGain.connect(audio.destination);
-      engOsc.frequency.value = 55;
-      engOsc.start();
-    } catch {}
-  }
-  function setEngine(speed, max){
-    if (engOsc) engOsc.frequency.value = 48 + (speed / max) * 135;
-  }
-  function stopEngine(){ try { if (engOsc){ engOsc.stop(); engOsc = null; engGain = null; } } catch {} }
-  let crowdSrc = null, crowdGain = null, crowdFilt = null;
-  function startCrowd(){
-    if (!profile.sound || crowdSrc) return;
-    try {
-      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
-      const len = audio.sampleRate * 2;
-      const buf = audio.createBuffer(1, len, audio.sampleRate);
-      const d = buf.getChannelData(0);
-      let last = 0;
-      for (let i = 0; i < len; i++){
-        const w = Math.random() * 2 - 1;
-        last = (last + 0.02 * w) / 1.02; // pink-ish murmur
-        d[i] = last * 3.5;
-      }
-      crowdSrc = audio.createBufferSource(); crowdSrc.buffer = buf; crowdSrc.loop = true;
-      crowdFilt = audio.createBiquadFilter(); crowdFilt.type = 'bandpass';
-      crowdFilt.frequency.value = 850; crowdFilt.Q.value = 0.7;
-      crowdGain = audio.createGain(); crowdGain.gain.value = 0;
-      crowdSrc.connect(crowdFilt); crowdFilt.connect(crowdGain); crowdGain.connect(audio.destination);
-      crowdSrc.start();
-    } catch {}
-  }
-  function setCrowd(level){
-    if (crowdGain) crowdGain.gain.value = level;
-    if (crowdFilt) crowdFilt.frequency.value = 750 + level * 2800;
-  }
-  function stopCrowd(){ try { if (crowdSrc){ crowdSrc.stop(); crowdSrc = null; crowdGain = null; } } catch {} }
-  let nextHornT = 0;
-  function playHorn(vol){
-    try {
-      const t0 = audio.currentTime;
-      const o = audio.createOscillator(), g = audio.createGain(), f = audio.createBiquadFilter();
-      o.type = 'sawtooth';
-      o.frequency.value = 205 + Math.random() * 45; // vuvuzela drone
-      f.type = 'lowpass'; f.frequency.value = 850;
-      const dur = 0.5 + Math.random() * 0.9;
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(vol, t0 + 0.06);
-      g.gain.setValueAtTime(vol, t0 + dur * 0.7);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-      o.connect(f); f.connect(g); g.connect(audio.destination);
-      o.start(t0); o.stop(t0 + dur + 0.05);
-    } catch {}
-  }
-  function updateCrowdSound(now){
-    if (!crowdGain || !me) return;
-    let best = 1e18;
-    for (const [zx, zy] of crowdZones){
-      const dx = zx - me.x, dy = zy - me.y;
-      const d = dx * dx + dy * dy;
-      if (d < best) best = d;
-    }
-    const dist = Math.sqrt(best);
-    const lvl = Math.max(0, 1 - dist / 700);
-    const excited = dist < 240 ? 1.7 : 1; // they go wild when you're right there
-    setCrowd(lvl * 0.13 * excited * (0.75 + 0.25 * Math.sin(now * 0.004)));
-    if (lvl > 0.3 && now > nextHornT && audio && profile.sound){
-      playHorn(Math.min(0.09, lvl * 0.09));
-      nextHornT = now + 900 + Math.random() * (3500 / lvl);
-    }
-  }
-  // mobile browsers may suspend audio until a touch — wake it up
-  const resumeAudio = () => { try { if (audio) audio.resume(); if (racing && !engOsc) startEngine(); if (racing && !crowdSrc) startCrowd(); } catch {} };
-  window.addEventListener('touchstart', resumeAudio, { passive: true });
-  window.addEventListener('pointerdown', resumeAudio, { passive: true });
-
-  function blip(freq, dur, type){
-    if (!profile.sound) return;
-    try {
-      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
-      const o = audio.createOscillator(), g = audio.createGain();
-      o.type = type || 'sine'; o.frequency.value = freq;
-      g.gain.setValueAtTime(0.12, audio.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + dur);
-      o.connect(g); g.connect(audio.destination);
-      o.start(); o.stop(audio.currentTime + dur);
-    } catch {}
-  }
+  // Sound was removed: a driving game played one-handed on a phone, usually
+  // muted, where the engine drone added nothing and the iPhone silent switch
+  // killed it half the time anyway. The calls are gone rather than stubbed.
 
   // ============ input ============
   const keys = {};
@@ -1731,9 +1628,7 @@
   }
   function release(){
     meReleased = true;
-    $('rollHint').textContent = '🟢 GO! FOLLOW THE PIT LANE ➜ START LINE';
-    blip(700, 0.12); blip(980, 0.16);
-  }
+    $('rollHint').textContent = '🟢 GO! FOLLOW THE PIT LANE ➜ START LINE';  }
   // offline / solo fallback: if no marshal message arrives in time, self-release
   function checkSoloFallback(now){
     if (meQueued && !meReleased && (!online || !myId) && now - meJoinT > 1400) release();
@@ -1815,7 +1710,6 @@
     $('hlActions').style.display = 'none';
     if (stageExpired) return location.reload();
     if (!racing) return;
-    stopEngine();
     if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'run_end' }));
     beginRun();
   }
@@ -1829,12 +1723,11 @@
     if (spectating) return exitSpectate();
     const wasRacing = racing;
     racing = false; started = false;
-    stopEngine(); stopCrowd();
     if (wasRacing){
       leaveQueue();
       if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'run_end' }));
     }
-    ['hud','controls','minimap','muteBtn','restartBtn','homeBtn','rollHint','racersPanel'].forEach(id => $(id).classList.add('hidden'));
+    ['hud','controls','minimap','restartBtn','homeBtn','rollHint','racersPanel'].forEach(id => $(id).classList.add('hidden'));
     $('finish').classList.add('hidden');
     $('delta').classList.remove('show');
     renderLb($('lbBox'));
@@ -1896,33 +1789,27 @@
     $('hud').classList.remove('hidden');
     $('controls').classList.remove('hidden');
     $('minimap').classList.remove('hidden');
-    $('muteBtn').classList.remove('hidden');
+    $().classList.remove('hidden');
     $('restartBtn').classList.remove('hidden');
     $('homeBtn').classList.remove('hidden');
     $('racersPanel').classList.remove('hidden');
     renderRacers();
-    $('muteBtn').textContent = profile.sound ? '🔊' : '🔇';
     $('rollHint').classList.remove('hidden');
     $('timeLabel').textContent = '--.--';
     lastT = performance.now();
-    startEngine();
-    startCrowd();
   }
 
   function crossStart(){
     started = true; raceT = 0;
     meQueued = false;
     if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'crossed' }));
-    $('rollHint').classList.add('hidden');
-    blip(660, 0.15); blip(880, 0.2);
-  }
+    $('rollHint').classList.add('hidden');  }
 
   function eat(f){
     if (!f.go && me.shieldT > 0){
       f.eaten = true;
       eatenList.push({ def: f.def, go: false, blocked: true });
       burst(f.x, f.y, '#5bd1ff', 10);
-      blip(640, 0.1);
       foodToast('🛡 Shield! ' + f.def[0] + ' ' + f.def[1] + ' — blocked', false);
       return;
     }
@@ -1933,16 +1820,13 @@
     if (f.go){
       ateGo++;
       me.size = Math.max(0, me.size - 1);
-      me.boostT = 1.0;
-      blip(760, 0.12); blip(1020, 0.15);
-      foodToast(`${emoji} ${name} — ${fact}`, false);
+      me.boostT = 1.0;      foodToast(`${emoji} ${name} — ${fact}`, false);
       burst(f.x, f.y, '#2fae4e', 12);
     } else {
       ateWhoa++;
       me.size = Math.min(4, me.size + 1);
       maxSize = Math.max(maxSize, me.size);
       me.slowT = 0.4; wobbleT = 0.4;
-      blip(160, 0.25, 'square');
       foodToast(`${emoji} ${name} — ${fact}`, true);
       burst(f.x, f.y, '#ff8c2e', 12);
     }
@@ -1981,14 +1865,12 @@
 
   async function finishRun(dnf){
     racing = false;
-    stopEngine();
-    stopCrowd();
     if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'run_end' }));
     const timeMs = dnf ? DNF_AT * 1000 : Math.round(raceT * 1000);
     lastTimeMs = timeMs;
     const sec = timeMs / 1000;
     lastMedal = dnf ? '' : sec <= PAR.gold ? '🥇' : sec <= PAR.silver ? '🥈' : sec <= PAR.bronze ? '🥉' : '';
-    ['hud','controls','minimap','muteBtn','restartBtn','homeBtn','rollHint','racersPanel'].forEach(id => $(id).classList.add('hidden'));
+    ['hud','controls','minimap','restartBtn','homeBtn','rollHint','racersPanel'].forEach(id => $(id).classList.add('hidden'));
     $('delta').classList.remove('show');
 
     $('finStage').textContent = cuisine.name + ' · SS #' + stageNo;
@@ -2088,7 +1970,7 @@
     $('hlActions').style.display = 'flex';
     $('hlReplay').textContent = 'PLAYING…';
     hlStop = FPRClip.playClip($('hlCanvas'), hlSegs.stage, hlSegs.segs, {
-      zoom: 0.6, speak: profile.sound !== false,
+      zoom: 0.6,
       onEnd: () => {
         hlStop = null;
         $('hlReplay').textContent = 'REPLAY';
@@ -2359,7 +2241,7 @@
           const lat = (me.x - px) * nx + (me.y - py) * ny;
           const a = rp.side < 0 ? -w * 0.92 : w * 0.06;
           const b = rp.side < 0 ? -w * 0.06 : w * 0.92;
-          if (lat > a && lat < b){ me.vz = 300; blip(520, 0.12); blip(700, 0.14); clipEvents.push({ t: raceT * 1000, kind: 'jump' }); }
+          if (lat > a && lat < b){ me.vz = 300; clipEvents.push({ t: raceT * 1000, kind: 'jump' }); }
           break;
         }
       }
@@ -2402,7 +2284,6 @@
       me.speed *= 0.55; me.vx *= 0.55; me.vy *= 0.55;
       if (!(me.scrapeT > 0)){
         burst(me.x, me.y, '#c9c2b4', 8);
-        blip(150, 0.12, 'square');
         me.scrapeT = 0.35;
       }
     }
@@ -2419,7 +2300,6 @@
       }
       me.vx = 0; me.vy = 0;
       me.speed = 0; me.slowT = 0.4; me.stunT = 0.5;
-      blip(220, 0.25, 'square');
       foodToast(strictRules ? '🚧 OFF COURSE — back where you left the road!'
                             : '🚧 OFF COURSE — back on the track!', true);
     }
@@ -2436,7 +2316,6 @@
       }
       me.vx = 0; me.vy = 0;
       me.speed = 0; me.slowT = 0.4; me.stunT = 1.0;
-      blip(180, 0.3, 'square');
       foodToast('💦 SPLASH! +1s penalty', true);
     }
     let max = ((onRoad || me.z > 0) ? MAX_SPD : MAX_SPD * 0.4) * (1 - me.size * 0.045);
@@ -2480,7 +2359,6 @@
       if (dxs * dxs + dys * dys < (r + st.s) * (r + st.s)){
         me.speed *= 0.2; me.slowT = 0.5; me.invulnT = 1.0; wobbleT = 0.35;
         burst(st.x, st.y, '#8a938a', 12);
-        blip(140, 0.2, 'square');
         foodToast('🪨 CRASH! Watch out for rocks', true);
         break;
       }
@@ -2491,9 +2369,7 @@
       if (!wp.taken && me.z <= 12){
         const dxw = wp.x - me.x, dyw = wp.y - me.y;
         if (dxw * dxw + dyw * dyw < (r + 16) * (r + 16)){
-          wp.taken = true; me.shieldT = 3;
-          blip(880, 0.15); blip(1180, 0.2);
-          foodToast('💧 WATER SHIELD — junk-proof for 3 seconds!', false);
+          wp.taken = true; me.shieldT = 3;          foodToast('💧 WATER SHIELD — junk-proof for 3 seconds!', false);
           burst(wp.x, wp.y, '#5bd1ff', 14);
         }
       }

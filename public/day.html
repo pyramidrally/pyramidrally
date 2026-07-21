@@ -108,9 +108,6 @@
     <div id="reelOut"></div>
     <canvas id="reelCanvas" width="320" height="240" style="display:none"></canvas>
     <button id="playBtn" style="display:none">▶ PLAY WITH COMMENTARY</button>
-    <div class="note" id="speakNote" style="display:none;font-size:11px;padding:6px 0 0">
-      Commentary is spoken by your browser's own voice, so it plays here but isn't part of the saved file.
-    </div>
   </div>
 
   <div class="foot">
@@ -289,7 +286,7 @@
     cv.style.display = '';
     $('playBtn').textContent = '⏹ STOP';
     stopPlay = FPRClip.playClip(cv, lastReel.stage, lastReel.segs, {
-      zoom: 0.58, speak: true,
+      zoom: 0.58,
       onEnd: () => { stopPlay = null; $('playBtn').textContent = '▶ PLAY AGAIN'; },
     });
   });
@@ -358,7 +355,6 @@
       $('reelOut').innerHTML = '<img alt="FPRC highlights" src="' + url + '">' +
         '<a download="fprc-' + date + '.gif" href="' + url + '">⬇ save this reel (' + kb + ' KB)</a>';
       $('playBtn').style.display = '';
-      $('speakNote').style.display = '';
       btn.textContent = original;
     } catch (e){
       $('reelOut').innerHTML = '<div class="note">Could not build the reel: ' + esc(e.message) + '</div>';
