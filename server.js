@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
 const auth = require('./auth');
+const stageGen = require('./public/stage.js');
 
 const PORT = process.env.PORT || 3000;
 const LB_FILE = path.join(__dirname, 'leaderboard.json');
@@ -55,6 +56,60 @@ function mulberry32(a) {
     return ((t ^ t >>> 14) >>> 0) / 4294967296;
   };
 }
+// The fastest a stage can physically be driven: its length at top speed with
+// the boost held down the whole way. Anything quicker did not go round the
+// track. Derived per stage rather than hardcoded, so it follows the generator.
+const MAX_SPD = 430, BOOST = 1.5;
+// must match STRICT_FROM in public/index.html
+const STRICT_FROM = '2026-07-22';
+const floorCache = new Map();
+// The shortest line a car could legally drive — not the centreline, which
+// nobody drives. Start on the centreline and repeatedly pull each point toward
+// the straight line between its neighbours, clamped to stay on the road: the
+// string goes taut through the corridor. On a twisty stage that is 10-17%
+// shorter than the centreline, and a floor built on the centreline would have
+// rejected a genuinely brilliant run.
+function shortestLegalLine(t) {
+  const a = t.START_I, b = t.FINISH_I;
+  const p = [];
+  for (let i = a; i <= b; i++) p.push([t.pts[i][0], t.pts[i][1]]);
+  for (let k = 0; k < 400; k++) {
+    for (let i = 1; i < p.length - 1; i++) {
+      const tx = (p[i - 1][0] + p[i + 1][0]) / 2, ty = (p[i - 1][1] + p[i + 1][1]) / 2;
+      let nx = p[i][0] + (tx - p[i][0]) * 0.5, ny = p[i][1] + (ty - p[i][1]) * 0.5;
+      const ci = a + i, cx = t.pts[ci][0], cy = t.pts[ci][1], lim = t.widths[ci] * 0.92;
+      const dx = nx - cx, dy = ny - cy, d = Math.hypot(dx, dy);
+      if (d > lim) { nx = cx + dx / d * lim; ny = cy + dy / d * lim; }
+      p[i][0] = nx; p[i][1] = ny;
+    }
+  }
+  let len = 0;
+  for (let i = 0; i < p.length - 1; i++) len += Math.hypot(p[i + 1][0] - p[i][0], p[i + 1][1] - p[i][1]);
+  return len;
+}
+
+// Before strict rules, the GAME let you skip sections: driving off course put
+// you back on the nearest centreline point, which could be ahead of where you
+// left. Times set that way are the game's doing, not the driver's, and they
+// count. Only obvious nonsense is refused on those days.
+const LEGACY_FLOOR_MS = 5000;
+function minPlausibleMs(date) {
+  let v = floorCache.get(date);
+  if (v !== undefined) return v;
+  if (date < STRICT_FROM) {
+    v = LEGACY_FLOOR_MS;
+  } else {
+    try {
+      v = Math.round((shortestLegalLine(stageGen.buildStage(date)) / (MAX_SPD * BOOST)) * 1000 * 0.95);
+    } catch (e) {
+      v = 15000;
+    }
+  }
+  if (floorCache.size > 60) floorCache.clear();
+  floorCache.set(date, v);
+  return v;
+}
+
 function stageInfo(date) {
   const sw = seedWords(date);
   const no = Math.floor((Date.parse(date + 'T00:00:00Z') - STAGE_EPOCH) / 86400000) + 1;
@@ -528,8 +583,24 @@ wss.on('connection', (ws) => {
         send(ws, { t: 'finish_stale', stage: m.date, today: today() });
         return;
       }
+      // Reject the impossible — but SAY SO. Dropping it silently made the
+      // leaderboard look broken to the one person it happened to.
       const t = Math.round(Number(m.time));
-      if (!Number.isFinite(t) || t < 20000 || t > 120000) return; // sanity: 20s–120s
+      const floorMs = minPlausibleMs(today());
+      if (!Number.isFinite(t)) {
+        send(ws, { t: 'finish_rejected', why: 'That time could not be read.' });
+        return;
+      }
+      if (t < floorMs) {
+        send(ws, { t: 'finish_rejected',
+                   why: `${(t / 1000).toFixed(2)}s is faster than this stage can physically be driven ` +
+                        `(${(floorMs / 1000).toFixed(1)}s flat out with boost). Time not recorded.` });
+        return;
+      }
+      if (t > 120000) {
+        send(ws, { t: 'finish_rejected', why: 'Over two minutes — time not recorded.' });
+        return;
+      }
       const p = Array.isArray(m.path) && m.path.length <= 3000 ? m.path.map(v => Math.round(Number(v)) || 0) : null;
       const b = board();
       // signed-in drivers are keyed by account, anonymous ones by name — so
