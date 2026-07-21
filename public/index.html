@@ -175,7 +175,11 @@
   #crewBox img{display:block;margin:0 auto}
 
   /* post-race menu + leaderboard faces */
-  #finEaten{max-height:170px;overflow-y:auto;width:100%;margin:8px 0;text-align:left;
+  /* flex-shrink must be off: this is a flex item in a column overlay, and a
+     scrolling box has no min-content height to protect it, so once the
+     highlight player was added below it this collapsed to nothing */
+  #finEaten{flex:0 0 auto;max-height:170px;min-height:76px;overflow-y:auto;width:100%;
+    margin:8px 0;text-align:left;
     border:1px solid #e2ecd6;border-radius:12px;padding:6px 10px;background:#fbfdf7}
   .eRow{display:flex;align-items:baseline;gap:8px;padding:4px 0;border-bottom:1px dashed #edf3e3;font-size:12px}
   .eRow:last-child{border-bottom:none}
@@ -218,9 +222,9 @@
   #specWho{color:#fff;font-size:12.5px;font-weight:800;text-align:center;min-width:132px;line-height:1.35}
   #specWho span{display:block;font-size:10.5px;font-weight:600;color:#b9cfa1;letter-spacing:.4px}
   .watchRow{color:#8a9880 !important;font-weight:700}
-  #hlCanvas{display:none;width:100%;max-width:330px;border-radius:12px;border:1px solid #dfe8d2;
+  #hlCanvas{flex:0 0 auto;display:none;width:100%;max-width:330px;border-radius:12px;border:1px solid #dfe8d2;
     margin:8px auto 0;background:#c7dcae}
-  #hlActions{display:none;gap:8px;margin:8px auto 0;max-width:330px}
+  #hlActions{flex:0 0 auto;display:none;gap:8px;margin:8px auto 0;max-width:330px}
   #hlActions button{flex:1;background:#fff;border:2px solid var(--green);color:var(--dgreen);
     border-radius:11px;font-family:'Rubik',sans-serif;font-weight:800;font-size:11.5px;
     padding:10px 6px;cursor:pointer}
@@ -1512,6 +1516,45 @@
   // muted, where the engine drone added nothing and the iPhone silent switch
   // killed it half the time anyway. The calls are gone rather than stubbed.
 
+  // ============ track wear ============
+  // Faint marks where today's cars actually went, so a stage that has been
+  // driven looks driven. Deliberately barely there: strong enough to notice
+  // the racing line, weak enough that food and scenery still read clearly.
+  // Purely cosmetic — it never touches the physics.
+  let wear = null;
+  async function loadWear(){
+    if (!HAS_SERVER || dateStr < '2026-07-22') return;
+    try {
+      const j = await fetch('/api/wear?d=' + dateStr).then(r => r.json());
+      if (j && j.runs > 0 && j.lat && j.n) wear = j;
+    } catch (e) {}
+  }
+  function drawWear(ctx, lo, hi){
+    if (!wear) return;
+    const { lat, n } = wear;
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (let i = Math.max(lo, 1); i < hi; i++){
+      const c = n[i] | 0;
+      if (!c) continue;
+      const w = widths[i];
+      const off = (lat[i] / 100) * w;
+      const [nx, ny] = normals[i];
+      const [ax, ay] = pts[i], [bx, by] = pts[i + 1] || pts[i];
+      // two thin streaks, a car's width apart, along the average line taken
+      const a = Math.min(0.085, 0.02 + c * 0.006);
+      ctx.strokeStyle = 'rgba(90,106,78,' + a.toFixed(3) + ')';
+      ctx.lineWidth = 9;
+      for (const side of [-11, 11]){
+        ctx.beginPath();
+        ctx.moveTo(ax + nx * (off + side), ay + ny * (off + side));
+        ctx.lineTo(bx + nx * (off + side), by + ny * (off + side));
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
   // ============ input ============
   const keys = {};
   window.addEventListener('keydown', e => keys[e.key] = true);
@@ -2495,6 +2538,8 @@
       }
     }
 
+    drawWear(ctx, lo, hi);
+
     // tunnel mouths
     for (const [a, b] of tunnels){
       for (const i of [a, b]){
@@ -3064,6 +3109,7 @@
   initAuth();
   loadMonth();
   loadYesterdayReel();
+  loadWear();
 })();
 </script>
 </body>

@@ -363,6 +363,55 @@ app.get('/day', (req, res) => {
 });
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Track wear: where people actually drove today. Built from the recorded lines
+// already stored for the reel, so it costs no extra bandwidth from players and
+// no extra storage — just an aggregate of lines we already keep.
+const wearCache = new Map();
+const WEAR_FROM = '2026-07-22';
+function wearFor(date) {
+  if (date < WEAR_FROM) return null;
+  const hit = wearCache.get(date);
+  if (hit && Date.now() - hit.at < 60e3) return hit.v;
+  let v = null;
+  try {
+    const t = stageGen.buildStage(date);
+    const rows = (store.boards[date] || []).filter(e => e.p && e.p.length > 30);
+    if (rows.length) {
+      const lat = new Float64Array(t.NPTS);
+      const cnt = new Float64Array(t.NPTS);
+      for (const e of rows) {
+        const p = e.p;
+        for (let k = 0; k + 2 < p.length; k += 3) {
+          const i = p[k + 2] | 0;
+          if (i < 0 || i >= t.NPTS) continue;
+          const nx = t.normals[i][0], ny = t.normals[i][1];
+          const off = (p[k] - t.pts[i][0]) * nx + (p[k + 1] - t.pts[i][1]) * ny;
+          const w = t.widths[i] || 1;
+          const f = Math.max(-1, Math.min(1, off / w));
+          lat[i] += f; cnt[i] += 1;
+        }
+      }
+      // quantised: average offset as a percentage of half-width, and how many
+      // cars came through. Small enough to send once and forget.
+      const L = new Array(t.NPTS), N = new Array(t.NPTS);
+      for (let i = 0; i < t.NPTS; i++) {
+        L[i] = cnt[i] ? Math.round((lat[i] / cnt[i]) * 100) : 0;
+        N[i] = Math.min(255, cnt[i] | 0);
+      }
+      v = { runs: rows.length, lat: L, n: N };
+    }
+  } catch (e) { v = null; }
+  if (wearCache.size > 8) wearCache.clear();
+  wearCache.set(date, { at: Date.now(), v });
+  return v;
+}
+
+app.get('/api/wear', (req, res) => {
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(req.query.d || '') ? req.query.d : today();
+  res.set('Cache-Control', 'no-store');
+  res.json(wearFor(d) || { runs: 0 });
+});
+
 app.get('/api/config', (req, res) => {
   // Never let a browser cache this: it is used to check whether a deploy took,
   // and a cached copy from before the deploy says the opposite of the truth.
