@@ -42,7 +42,16 @@
   input#pname:focus{border-color:var(--green)}
   .note{font-size:11px;color:#7a8a6e;margin:6px 0 10px;max-width:320px}
   .lbl{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#7a8a6e;font-weight:700;margin:10px 0 6px}
-  #facePrev{width:110px;height:110px;background:#fff;border:2px solid #c8d8b8;border-radius:16px;margin:4px 0}
+  #faceWrap{position:relative;display:inline-block;margin:4px 0}
+  #facePrev{display:block;width:110px;height:110px;background:#fff;border:2px dashed #9fc07f;
+    border-radius:16px;cursor:crosshair;touch-action:none}
+  #faceWrap.drawn #facePrev{border-style:solid;border-color:#c8d8b8}
+  #faceHint{position:absolute;left:50%;bottom:-7px;transform:translateX(-50%);white-space:nowrap;
+    background:var(--green);color:#fff;font-size:9px;font-weight:800;letter-spacing:.4px;
+    padding:3px 8px;border-radius:999px;pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,.18);
+    animation:hintPulse 1.8s ease-in-out infinite}
+  #faceWrap.drawn #faceHint{display:none}
+  @keyframes hintPulse{0%,100%{transform:translateX(-50%) scale(1)}50%{transform:translateX(-50%) scale(1.07)}}
   .swatches{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:340px}
   .sw{width:32px;height:32px;border-radius:50%;border:3px solid transparent;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.15)}
   .sw.sel{border-color:var(--ink);transform:scale(1.15)}
@@ -271,7 +280,11 @@
   <div class="card">
     <div class="cardHead">driver &amp; livery</div>
     <input id="pname" maxlength="20" placeholder="DRIVER NAME" autocomplete="off">
-    <canvas id="facePrev" width="220" height="220"></canvas>
+    <div class="lbl">your car — draw on it</div>
+    <div id="faceWrap">
+      <canvas id="facePrev" width="220" height="220"></canvas>
+      <div id="faceHint">✏ TAP TO DRAW</div>
+    </div>
     <div class="pillrow" id="paints"></div>
     <div class="lbl">base color</div>
     <div class="swatches" id="swatches"></div>
@@ -1215,7 +1228,15 @@
   prevCv.addEventListener('pointerup', endPaint);
   prevCv.addEventListener('pointercancel', endPaint);
 
+  // The preview IS the editor, which was not obvious — it looked like a picture
+  // of your car rather than something you draw on. The dashed border and the
+  // badge say so, and both retire once you have made it yours.
+  function markDrawn(){
+    const w = $('faceWrap');
+    if (w) w.classList.toggle('drawn', !!profile.face.paint && profile.face.paint !== DEFAULT_PAINT);
+  }
   function renderPreview(){
+    markDrawn();
     paintCache.delete(profile.face.paint); // repaint fresh while editing
     const cv = $('facePrev'), g = cv.getContext('2d');
     g.clearRect(0, 0, cv.width, cv.height);
