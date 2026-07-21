@@ -42,7 +42,10 @@
   input#pname:focus{border-color:var(--green)}
   .note{font-size:11px;color:#7a8a6e;margin:6px 0 10px;max-width:320px}
   .lbl{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#7a8a6e;font-weight:700;margin:10px 0 6px}
-  #faceWrap{position:relative;display:inline-block;margin:4px 0}
+  /* the swatches below are centred, so the canvas has to be too — it sat left
+     because .card is text-align:left, which the dashed border made obvious */
+  #faceWrap{position:relative;display:block;width:110px;margin:4px auto 10px}
+  #faceLbl{text-align:center}
   #facePrev{display:block;width:110px;height:110px;background:#fff;border:2px dashed #9fc07f;
     border-radius:16px;cursor:crosshair;touch-action:none}
   #faceWrap.drawn #facePrev{border-style:solid;border-color:#c8d8b8}
@@ -280,7 +283,7 @@
   <div class="card">
     <div class="cardHead">driver &amp; livery</div>
     <input id="pname" maxlength="20" placeholder="DRIVER NAME" autocomplete="off">
-    <div class="lbl">your car — draw on it</div>
+    <div class="lbl" id="faceLbl">your car — draw on it</div>
     <div id="faceWrap">
       <canvas id="facePrev" width="220" height="220"></canvas>
       <div id="faceHint">✏ TAP TO DRAW</div>
