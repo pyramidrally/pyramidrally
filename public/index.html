@@ -372,7 +372,6 @@
   <div class="note">Food facts are simplified for the game — sources &amp; how-to are in the menu.</div>
   <button class="bigbtn orange" id="retryBtn">RETRY STAGE</button>
   <button class="bigbtn ghostbtn" id="finMenuBtn">🎨 CHANGE DRIVER &amp; SETUP</button>
-  <button class="bigbtn ghostbtn" id="gifBtn">WATCH YOUR HIGHLIGHT</button>
   <canvas id="hlCanvas" width="320" height="240"></canvas>
   <div id="hlActions">
     <button id="hlReplay">REPLAY</button>
@@ -1247,6 +1246,10 @@
       }
       if (m.t === 'lb'){ lb = m.lb; renderLb($('lbBox')); renderLb($('lbBox2')); }
       if (m.t === 'event') tickEvent(m.msg);
+      if (m.t === 'finish_rejected'){
+        toast(m.why || 'Time not recorded.');
+        $('finSub').innerHTML += '<br><span style="color:#c0563a">⚠ ' + esc(m.why || 'Time not recorded.') + '</span>';
+      }
       if (m.t === 'finish_stale'){
         stageExpired = true;
         toast("⏱ That stage closed at midnight UTC — your time wasn't recorded.");
@@ -1583,6 +1586,26 @@
     return false;
   }
 
+  // Did the step from (ax,ay) to (bx,by) pass through the finish banner, going
+  // the right way? The banner is the segment drawn across the road at FINISH_I.
+  function crossedFinish(ax, ay, bx, by){
+    if (ax === undefined) return false;
+    const [px, py] = pts[FINISH_I], [nx, ny] = normals[FINISH_I];
+    const w = widths[FINISH_I] * 1.05;                 // the painted banner
+    const l1x = px - nx * w, l1y = py - ny * w;
+    const l2x = px + nx * w, l2y = py + ny * w;
+    const d1x = bx - ax, d1y = by - ay;
+    const d2x = l2x - l1x, d2y = l2y - l1y;
+    const den = d1x * d2y - d1y * d2x;
+    if (Math.abs(den) < 1e-9) return false;            // parallel
+    const t = ((l1x - ax) * d2y - (l1y - ay) * d2x) / den;
+    const u = ((l1x - ax) * d1y - (l1y - ay) * d1x) / den;
+    if (t < 0 || t > 1 || u < 0 || u > 1) return false;
+    // and it must be crossed forwards, not stepped back over
+    const fd = trackDir(FINISH_I);
+    return (d1x * Math.cos(fd) + d1y * Math.sin(fd)) > 0;
+  }
+
   function trackDir(i){
     const a = pts[Math.max(0, i - 1)], b = pts[Math.min(NPTS - 1, i + 1)];
     return Math.atan2(b[1] - a[1], b[0] - a[0]);
@@ -1666,10 +1689,18 @@
 
   // ============ race state ============
   const BASE_R = 15, MAX_SPD = 430;
+
+  // Rules that change how a stage is driven can't come into force mid-day, or
+  // the board would mix runs driven under different rules. These start with
+  // the stage of this date and apply to every stage after it.
+  const STRICT_FROM = '2026-07-22';
+  const strictRules = dateStr >= STRICT_FROM;
   let me = null, racing = false, started = false, raceT = 0, idx = 0, runT = 0, listAcc = 0, skids = [];
   let camX = 0, camY = 0, particles = [], recorded = [], recAcc = 0, posAcc = 0;
   let activeGhosts = [], cpDone = [], ateGo = 0, ateWhoa = 0, maxSize = 0, wobbleT = 0, eatenList = [], wrongWayRefIdx = 0, wrongWayT = 0;
   let clipEvents = []; // {t, kind} — drives highlight picking, never leaves the device
+  let lastOn = { x: 0, y: 0, a: 0, i: 0, has: false };  // last spot legitimately on the road
+  let prevX, prevY;
   let stageExpired = false;
   let spectating = false, specTarget = null;
   const CPS = [0.25, 0.5, 0.75].map(f => Math.floor(START_I + (FINISH_I - START_I) * f));
@@ -1678,6 +1709,10 @@
 
   $('startBtn').addEventListener('click', beginRun);
   function restartRun(){
+    clearTimeout(hlAutoT);
+    if (hlStop){ hlStop(); hlStop = null; }
+    $('hlCanvas').style.display = 'none';
+    $('hlActions').style.display = 'none';
     if (stageExpired) return location.reload();
     if (!racing) return;
     stopEngine();
@@ -1686,6 +1721,7 @@
   }
   $('restartBtn').addEventListener('click', restartRun);
   function goToMenu(){
+    clearTimeout(hlAutoT);
     if (hlStop){ hlStop(); hlStop = null; }
     $('hlCanvas').style.display = 'none';
     $('hlActions').style.display = 'none';
@@ -1734,6 +1770,7 @@
     racing = true; started = false; raceT = 0; runT = 0; listAcc = 0;
     particles = []; recorded = []; recAcc = 0; posAcc = 0;
     cpDone = [false, false, false]; ateGo = 0; ateWhoa = 0; maxSize = 0; eatenList = []; wrongWayRefIdx = 0; wrongWayT = 0; clipEvents = [];
+    lastOn = { x: 0, y: 0, a: 0, i: 0, has: false }; prevX = undefined; prevY = undefined;
     for (const f of foods) f.eaten = false;
     for (const wp of waters) wp.taken = false;
     skids = [];
@@ -1904,6 +1941,9 @@
       $('finSub').textContent = 'Out of time! Grab more GO foods to stay small and fast.';
     }
     $('finish').classList.remove('hidden');
+    // give them a beat to read their time, then roll the highlight
+    clearTimeout(hlAutoT);
+    hlAutoT = setTimeout(startHighlight, 700);
   }
   function finishAck(rank, total){
     lastRank = rank;
@@ -1914,7 +1954,7 @@
   // ---------- your highlight, played right here ----------
   // Downloading a GIF on a phone is a dead end, so the clip plays inline the
   // way the daily reel does. The GIF is only encoded if you actually share.
-  let gifBusy = false, hlSegs = null, hlStop = null, hlBytes = null;
+  let gifBusy = false, hlSegs = null, hlStop = null, hlBytes = null, hlAutoT = 0;
   function hlStage(){
     return { pts, widths, normals, NPTS, bridges, ramps, START_I, FINISH_I,
              foods, stones, decor, patches };
@@ -1950,21 +1990,20 @@
       onEnd: () => { hlStop = null; $('hlReplay').textContent = 'REPLAY'; },
     });
   }
-  $('gifBtn').addEventListener('click', () => {
+  function startHighlight(){
     if (gifBusy) return;
-    if (!window.FPRClip || !recorded || recorded.length < 30){
-      toast('Not enough of that run was recorded to make a clip.');
-      return;
-    }
+    if (!window.FPRClip || !recorded || recorded.length < 30) return; // nothing to show
     gifBusy = true;
     try {
       hlBytes = null;
       hlSegs = buildHighlight();
       playHighlight();
-      $('gifBtn').textContent = 'WATCH YOUR HIGHLIGHT';
-    } catch (e){ toast('Could not build the clip: ' + e.message); }
+    } catch (e){
+      $('hlCanvas').style.display = 'none';
+      $('hlActions').style.display = 'none';
+    }
     gifBusy = false;
-  });
+  }
   $('hlReplay').addEventListener('click', () => { if (hlSegs) playHighlight(); });
   $('hlShare').addEventListener('click', async () => {
     if (!hlSegs) return;
@@ -2064,6 +2103,9 @@
   // ============ update ============
   let lastT = performance.now();
   function update(dt, now){
+    // where we were before this step — the finish line has to be crossed, so
+    // we need the segment travelled, not just the position
+    prevX = me ? me.x : undefined; prevY = me ? me.y : undefined;
     runT += dt;
     if (started){
       raceT += dt;
@@ -2184,13 +2226,26 @@
         }
       }
     }
+    // Remember the last place we were legitimately on the road, so leaving it
+    // can never gain ground.
+    if (onRoad && me.z === 0){
+      lastOn.x = me.x; lastOn.y = me.y; lastOn.a = me.angle; lastOn.i = idx; lastOn.has = true;
+    }
     if (me.z === 0 && dist > roadW + 110){
       burst(me.x, me.y, '#b9cfa1', 16);
-      me.x = pts[idx][0]; me.y = pts[idx][1];
-      me.angle = trackDir(idx); me.vx = 0; me.vy = 0;
+      // Putting the car on the nearest centreline point rewarded cutting: drive
+      // the chord across a corner and you were dropped back on AHEAD of where
+      // you left. Go back to where the road was last under the wheels instead.
+      if (strictRules && lastOn.has){
+        me.x = lastOn.x; me.y = lastOn.y; me.angle = lastOn.a; idx = lastOn.i;
+      } else {
+        me.x = pts[idx][0]; me.y = pts[idx][1]; me.angle = trackDir(idx);
+      }
+      me.vx = 0; me.vy = 0;
       me.speed = 0; me.slowT = 0.4; me.stunT = 0.5;
       blip(220, 0.25, 'square');
-      foodToast('🚧 OFF COURSE — back on the track!', true);
+      foodToast(strictRules ? '🚧 OFF COURSE — back where you left the road!'
+                            : '🚧 OFF COURSE — back on the track!', true);
     }
     // Bridges: drive off the edge → splash. This used to ask whether the
     // PROGRESS INDEX was on a bridge, which a hairpin defeats — the nearest
@@ -2198,8 +2253,12 @@
     // band of water you could drive on freely. Ask the water instead.
     if (me.z === 0 && !onRoad && overWater(me.x, me.y)){
       burst(me.x, me.y, '#5bd1ff', 22);
-      me.x = pts[idx][0]; me.y = pts[idx][1];
-      me.angle = trackDir(idx); me.vx = 0; me.vy = 0;
+      if (strictRules && lastOn.has){
+        me.x = lastOn.x; me.y = lastOn.y; me.angle = lastOn.a; idx = lastOn.i;
+      } else {
+        me.x = pts[idx][0]; me.y = pts[idx][1]; me.angle = trackDir(idx);
+      }
+      me.vx = 0; me.vy = 0;
       me.speed = 0; me.slowT = 0.4; me.stunT = 1.0;
       blip(180, 0.3, 'square');
       foodToast('💦 SPLASH! +1s penalty', true);
@@ -2312,7 +2371,11 @@
     $('timeLabel').textContent = started ? raceT.toFixed(2) : '--.--';
     $('speedLabel').textContent = Math.round(me.speed * 0.7);
 
-    if (idx >= FINISH_I) finishRun(false);
+    if (strictRules){
+      // The line has to go under the car. Reaching its distance up the track
+      // while off to one side is not finishing.
+      if (crossedFinish(prevX, prevY, me.x, me.y)) finishRun(false);
+    } else if (idx >= FINISH_I) finishRun(false);
   }
 
   // ============ render ============

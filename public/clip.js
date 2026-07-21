@@ -79,8 +79,9 @@
   const JUMP_MS = (2 * JUMP_V0 / JUMP_G) * 1000;
 
   function findJumps(path, dtMs, stage) {
-    const ramps = (stage.ramps || []).map(r => r.i);
+    const ramps = stage.ramps || [];
     if (!ramps.length) return [];
+    const { pts, widths, normals } = stage;
     const n = Math.floor(path.length / 3);
     const out = [];
     let busyUntil = -1;
@@ -88,11 +89,20 @@
       const t = i * dtMs;
       if (t < busyUntil) continue;
       const j = path[i * 3 + 2];
-      const step = Math.hypot(path[i * 3] - path[(i - 1) * 3], path[i * 3 + 1] - path[(i - 1) * 3 + 1]);
+      const x = path[i * 3], y = path[i * 3 + 1];
+      const step = Math.hypot(x - path[(i - 1) * 3], y - path[(i - 1) * 3 + 1]);
       const sp = step / (dtMs / 1000);
-      if (sp > 180 && ramps.some(r => Math.abs(r - j) <= 1)) {
-        out.push(t);
-        busyUntil = t + JUMP_MS;
+      if (sp <= 180) continue;
+      for (const rp of ramps) {
+        if (Math.abs(rp.i - j) > 2) continue;
+        const px = pts[rp.i][0], py = pts[rp.i][1];
+        const nx = normals[rp.i][0], ny = normals[rp.i][1];
+        const w = widths[rp.i];
+        const lat = (x - px) * nx + (y - py) * ny;        // which side of the road
+        const a = rp.side < 0 ? -w * 0.92 : w * 0.06;
+        const b = rp.side < 0 ? -w * 0.06 : w * 0.92;
+        if (lat > a && lat < b) { out.push(t); busyUntil = t + JUMP_MS; }
+        break;
       }
     }
     return out;
@@ -118,10 +128,12 @@
 
   function simulateEating(path, dtMs, stage, jumps) {
     const foods = stage.foods || [];
+    const waters = stage.waters || [];
     const n = Math.floor(path.length / 3);
     const eatenAt = new Float64Array(foods.length).fill(-1);
+    const shieldTaken = new Float64Array(waters.length).fill(-1);
     const sizeAt = new Float64Array(n);
-    let size = 0;
+    let size = 0, shieldUntil = -1;   // a shield lasts 3 seconds, not one use
     for (let i = 0; i < n; i++) {
       const t = i * dtMs;
       const x = path[i * 3], y = path[i * 3 + 1];
@@ -132,6 +144,19 @@
         const px = i > 0 ? path[(i - 1) * 3] : x, py = i > 0 ? path[(i - 1) * 3 + 1] : y;
         const vx = x - px, vy = y - py;
         const L2 = vx * vx + vy * vy || 1;
+        const nearStep = (ox, oy, reach) => {
+          let u = ((ox - px) * vx + (oy - py) * vy) / L2;
+          u = u < 0 ? 0 : u > 1 ? 1 : u;
+          const dx = px + vx * u - ox, dy = py + vy * u - oy;
+          return dx * dx + dy * dy < reach * reach;
+        };
+        for (let k = 0; k < waters.length; k++) {
+          if (shieldTaken[k] >= 0) continue;
+          if (nearStep(waters[k].x, waters[k].y, BASE_R + size * 5 + 16)) {
+            shieldTaken[k] = t;
+            shieldUntil = t + 3000;
+          }
+        }
         for (let k = 0; k < foods.length; k++) {
           if (eatenAt[k] >= 0) continue;
           const f = foods[k];
@@ -140,7 +165,9 @@
           const dx = px + vx * u - f.x, dy = py + vy * u - f.y;
           if (dx * dx + dy * dy < r2) {
             eatenAt[k] = t;
-            size = f.go ? Math.max(0, size - 1) : Math.min(4, size + 1);
+            if (f.go) size = Math.max(0, size - 1);
+            else if (t < shieldUntil) { /* shield blocks it: eaten, but no weight */ }
+            else size = Math.min(4, size + 1);
           }
         }
       }
@@ -148,7 +175,7 @@
     }
     let maxSize = 0, maxAt = 0;
     for (let i = 0; i < n; i++) if (sizeAt[i] > maxSize) { maxSize = sizeAt[i]; maxAt = i; }
-    return { eatenAt, sizeAt, maxSize, maxAt };
+    return { eatenAt, sizeAt, maxSize, maxAt, shieldTaken };
   }
 
   // ========================================================== commentary ====
@@ -160,7 +187,7 @@
   const LINES = {
     openFirst: ["{n} on the road, and this is the benchmark.",
                 "Here's {n} — quickest of the day so far.",
-                "{n} now. Watch how early they get on the power."],
+                "{n} now — watch how early they get on the power."],
     openMid:   ["{n} next, {p} on the day.",
                 "Here's {n}, running {p}.",
                 "{n} now — solid run, {p} overall."],
@@ -177,9 +204,9 @@
     hardR:     ["Hard right — committed.", "Big right, and they're leaning on it.",
                 "Into the right, plenty of lock."],
     pinL:      ["Hairpin left — hard on the brakes.", "Left hairpin, all the way round.",
-                "Tightens left, and that's caught plenty out."],
+                "Tightens left — that one catches people out."],
     pinR:      ["Hairpin right — hard on the brakes.", "Right hairpin, all the way round.",
-                "Tightens right, and that's caught plenty out."],
+                "Tightens right — that one catches people out."],
     bridge:    ["Onto the bridge — no room for error.", "Over the water now.",
                 "Bridge next, and it's narrow."],
     splash:    ["Off the deck — and into the water!", "That's a splash! Run ruined.",
@@ -192,8 +219,8 @@
                 "Straight through the good stuff."],
     whoa:      ["Oh, into the fryer — that'll cost them.",
                 "Picks up something heavy there.", "That's the wrong thing to eat."],
-    heavy:     ["Carrying a full load now — look at the size of it.",
-                "That car has eaten everything on the stage, and it shows.",
+    heavy:     ["Carrying a full load — look at the size of it.",
+                "Eaten everything on the stage, and it shows.",
                 "Wallowing through here, absolutely stuffed."],
     finish:    ["Across the line — {t}.", "And that's the stage done. {t}.",
                 "Takes the flag in {t}."],
@@ -683,22 +710,38 @@
     // caption bar: what the commentator is saying, then who we're watching
     const commentary = sample.commentary;
     if (caption || commentary) {
-      const barH = commentary ? 52 : 38;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      const maxW = W - 22;
+      let rows = [];
+      if (commentary) {
+        ctx.font = '700 14px Rubik, Arial, sans-serif';
+        const words = String(commentary).split(' ');
+        let cur = '';
+        for (const word of words) {
+          const trial = cur ? cur + ' ' + word : word;
+          if (ctx.measureText(trial).width > maxW && cur) { rows.push(cur); cur = word; }
+          else cur = trial;
+        }
+        if (cur) rows.push(cur);
+        if (rows.length > 2) {                    // never more than two lines
+          rows = rows.slice(0, 2);
+          let last = rows[1];
+          while (ctx.measureText(last + '…').width > maxW && last.length > 4) last = last.slice(0, -2);
+          rows[1] = last.replace(/[ ,.]+$/, '') + '…';
+        }
+      }
+      const barH = 20 + rows.length * 17;
       ctx.fillStyle = 'rgba(35,51,31,.84)';
       ctx.fillRect(0, H - barH, W, barH);
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      if (commentary) {
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '700 15px Rubik, Arial, sans-serif';
-        let line = commentary;
-        while (ctx.measureText(line).width > W - 22 && line.length > 4) line = line.slice(0, -2);
-        if (line !== commentary) line = line.replace(/[ ,.]+$/, '') + '…';
-        ctx.fillText(line, 11, H - barH + 15);
-      }
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 14px Rubik, Arial, sans-serif';
+      rows.forEach((r, i) => ctx.fillText(r, 11, H - barH + 12 + i * 17));
       if (caption) {
         ctx.fillStyle = '#c7dcae';
-        ctx.font = '700 12px Rubik, Arial, sans-serif';
-        ctx.fillText(caption + (sub ? '   ·   ' + sub : ''), 11, H - 12);
+        ctx.font = '700 11.5px Rubik, Arial, sans-serif';
+        let foot = caption + (sub ? '   ·   ' + sub : '');
+        while (ctx.measureText(foot).width > maxW && foot.length > 6) foot = foot.slice(0, -2);
+        ctx.fillText(foot, 11, H - 10);
       }
     }
     // corner badge

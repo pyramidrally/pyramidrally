@@ -417,6 +417,22 @@ const STEP = 24, NPTS = 600, START_I = 26, FINISH_I = NPTS - 10;
     }
   }
 
+  // water shields: grab one → junk-proof for 3 seconds
+  const waters = [];
+  {
+    const r = mulberry32(SW[5]);
+    let placed = 0, tries = 0;
+    while (placed < 2 && tries++ < 40){
+      const i = Math.floor(START_I + 50 + r() * (FINISH_I - START_I - 90));
+      if (bridges.some(([a, b]) => i > a - 6 && i < b + 6)) continue;
+      const [px, py] = pts[i], [nx, ny] = normals[i], w = widths[i];
+      const off = (r() * 2 - 1) * w * 0.5;
+      waters.push({ x: px + nx * off, y: py + ny * off, taken: false });
+      placed++;
+    }
+  }
+
+
   const decor = [], patches = [];
   {
     const r = mulberry32(SW[7]);
@@ -475,7 +491,7 @@ const STEP = 24, NPTS = 600, START_I = 26, FINISH_I = NPTS - 10;
   const DNF_AT = 75;
 
 
-    return { pts, widths, normals, bridges, ramps, foods, stones, decor, patches,
+    return { pts, widths, normals, bridges, ramps, foods, stones, decor, patches, waters,
              cuisine, NPTS, STEP, START_I, FINISH_I, SW };
   }
 
