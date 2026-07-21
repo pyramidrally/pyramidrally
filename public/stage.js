@@ -260,7 +260,28 @@
   function buildStage(dateStr) {
     const SW = sha256Words('pyramid-' + dateStr);
   const cuisine = CUISINES[Math.floor(mulberry32(SW[1])() * CUISINES.length)];
-const STEP = 24, NPTS = 600, START_I = 26, FINISH_I = NPTS - 10;
+  // Every stage used to be exactly (590-26)x24 px — the same length, the same
+  // two bridges, the same five ramps, every single day. Only the shape changed.
+  // From VARIETY_FROM the seed decides the distance and the furniture too, so
+  // some days are a 3km sprint and some are a 5km slog. Older dates keep the
+  // old numbers exactly, so their stored results and replays still line up.
+  const VARIETY_FROM = '2026-07-22';
+  const varied = dateStr >= VARIETY_FROM;
+  const STEP = 24;
+  const NPTS = varied ? 450 + Math.floor(mulberry32(SW[6] ^ 0x5eed)() * 341) : 600;
+  const START_I = 26, FINISH_I = NPTS - 10;
+  const STAGE_PX = (FINISH_I - START_I) * STEP;
+  // how many of each thing this stage gets
+  const COUNTS = (() => {
+    if (!varied) return { bridges: 2, ramps: 5, waters: 2 };
+    const r = mulberry32(SW[7] ^ 0x1eaf);
+    const scale = STAGE_PX / 13536;            // relative to the old fixed length
+    return {
+      bridges: Math.max(1, Math.min(3, Math.round((1 + Math.floor(r() * 3)) * scale))),
+      ramps: Math.max(2, Math.round((3 + Math.floor(r() * 5)) * scale)),
+      waters: Math.max(1, Math.min(3, Math.round((1 + Math.floor(r() * 3)) * scale))),
+    };
+  })();
   let pts = [], widths = [];
   {
     // Deterministic retry: generate, MEASURE self-clearance, and if the road
@@ -345,19 +366,22 @@ const STEP = 24, NPTS = 600, START_I = 26, FINISH_I = NPTS - 10;
   const ramps = [], bridges = [];
   {
     const r = mulberry32(SW[2]);
-    for (let b = 0; b < 2; b++){
+    for (let b = 0; b < COUNTS.bridges; b++){
       const s = Math.floor(START_I + 60 + r() * (FINISH_I - START_I - 170));
       bridges.push([s, s + 26 + Math.floor(r() * 14)]);
     }
     bridges.sort((a, b) => a[0] - b[0]);
-    if (bridges[1][0] < bridges[0][1] + 30){
-      const len = bridges[1][1] - bridges[1][0];
-      bridges[1][0] = bridges[0][1] + 40;
-      bridges[1][1] = bridges[1][0] + len;
-      if (bridges[1][1] > FINISH_I - 25) bridges.pop();
+    // push overlapping spans apart, and drop any that no longer fit
+    for (let b = 1; b < bridges.length; b++){
+      if (bridges[b][0] < bridges[b - 1][1] + 30){
+        const len = bridges[b][1] - bridges[b][0];
+        bridges[b][0] = bridges[b - 1][1] + 40;
+        bridges[b][1] = bridges[b][0] + len;
+      }
     }
+    while (bridges.length && bridges[bridges.length - 1][1] > FINISH_I - 25) bridges.pop();
     let tries = 0;
-    while (ramps.length < 5 && tries++ < 80){
+    while (ramps.length < COUNTS.ramps && tries++ < 80 + COUNTS.ramps * 16){
       const i = Math.floor(START_I + 30 + r() * (FINISH_I - START_I - 70));
       if (bridges.some(([a, b]) => i > a - 8 && i < b + 8)) continue;
       if (ramps.some(r0 => Math.abs(r0.i - i) < 25)) continue;
@@ -422,7 +446,7 @@ const STEP = 24, NPTS = 600, START_I = 26, FINISH_I = NPTS - 10;
   {
     const r = mulberry32(SW[5]);
     let placed = 0, tries = 0;
-    while (placed < 2 && tries++ < 40){
+    while (placed < COUNTS.waters && tries++ < 40 + COUNTS.waters * 20){
       const i = Math.floor(START_I + 50 + r() * (FINISH_I - START_I - 90));
       if (bridges.some(([a, b]) => i > a - 6 && i < b + 6)) continue;
       const [px, py] = pts[i], [nx, ny] = normals[i], w = widths[i];
@@ -487,12 +511,17 @@ const STEP = 24, NPTS = 600, START_I = 26, FINISH_I = NPTS - 10;
     }
   }
 
-  const PAR = { gold: 35, silver: 43, bronze: 56 };
-  const DNF_AT = 75;
+  const PACE = { gold: 386.74, silver: 314.79, bronze: 241.71, dnf: 180.48 }; // px/s
+  const PAR = varied
+    ? { gold: Math.round(STAGE_PX / PACE.gold),
+        silver: Math.round(STAGE_PX / PACE.silver),
+        bronze: Math.round(STAGE_PX / PACE.bronze) }
+    : { gold: 35, silver: 43, bronze: 56 };
+  const DNF_AT = varied ? Math.round(STAGE_PX / PACE.dnf) : 75;
 
 
     return { pts, widths, normals, bridges, ramps, foods, stones, decor, patches, waters,
-             cuisine, NPTS, STEP, START_I, FINISH_I, SW };
+             cuisine, NPTS, STEP, START_I, FINISH_I, STAGE_PX, COUNTS, SW };
   }
 
   root.buildStage = buildStage;
