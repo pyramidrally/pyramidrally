@@ -325,6 +325,10 @@ function worldGhost() {
 const SITE_URL = (process.env.SITE_URL || '').replace(/\/$/, '');
 
 const app = express();
+// Render terminates TLS and forwards over http, so without this req.protocol
+// reports 'http' and every canonical and og:url tag goes out as http://, on a
+// site that is only served over https.
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '16kb' }));
 
 // Pages carry %SITE_URL% placeholders for their link-preview tags. Crawlers
