@@ -351,6 +351,9 @@ app.get('/day', (req, res) => {
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/config', (req, res) => {
+  // Never let a browser cache this: it is used to check whether a deploy took,
+  // and a cached copy from before the deploy says the opposite of the truth.
+  res.set('Cache-Control', 'no-store, max-age=0');
   // commentary reports WHETHER a key is set, never the key itself, so a
   // deploy can be checked from a browser
   res.json({ google: GOOGLE_CLIENT_ID || null, storage: storageMode, points: POINTS,
