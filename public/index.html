@@ -2164,8 +2164,6 @@
       camY += (me.y - camY) * Math.min(dt * 5, 1);
       listAcc += dt;
       if (listAcc >= 0.5){ listAcc = 0; renderRacers(); }
-      setEngine(35, MAX_SPD);
-      updateCrowdSound(now);
       return;
     }
 
@@ -2418,8 +2416,6 @@
 
     listAcc += dt;
     if (listAcc >= 0.5){ listAcc = 0; renderRacers(); }
-    setEngine(me.speed * (me.z > 0 ? 1.25 : 1), MAX_SPD);
-    updateCrowdSound(now);
     $('timeLabel').textContent = started ? raceT.toFixed(2) : '--.--';
     $('speedLabel').textContent = Math.round(me.speed * 0.7);
 
