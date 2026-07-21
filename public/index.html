@@ -208,8 +208,9 @@
     margin:8px auto 0;background:#c7dcae}
   #hlActions{display:none;gap:8px;margin:8px auto 0;max-width:330px}
   #hlActions button{flex:1;background:#fff;border:2px solid var(--green);color:var(--dgreen);
-    border-radius:11px;font-family:'Rubik',sans-serif;font-weight:800;font-size:12.5px;
-    padding:10px;cursor:pointer}
+    border-radius:11px;font-family:'Rubik',sans-serif;font-weight:800;font-size:11.5px;
+    padding:10px 6px;cursor:pointer}
+  #hlActions #hlShare{background:var(--green);border-color:var(--green);color:#fff}
   #hlActions button:disabled{opacity:.55}
   #authBox .fineprint{text-align:left}
   #gBtn{display:flex;justify-content:center;min-height:42px}
@@ -376,6 +377,7 @@
   <div id="hlActions">
     <button id="hlReplay">REPLAY</button>
     <button id="hlShare">SHARE</button>
+    <button id="hlSave">SAVE</button>
   </div>
   <div class="lbTitle">TODAY'S LEADERBOARD</div>
   <div id="lbBox2"><span class="spin"></span></div>
@@ -1987,7 +1989,11 @@
     $('hlReplay').textContent = 'PLAYING…';
     hlStop = FPRClip.playClip($('hlCanvas'), hlSegs.stage, hlSegs.segs, {
       zoom: 0.6, speak: profile.sound !== false,
-      onEnd: () => { hlStop = null; $('hlReplay').textContent = 'REPLAY'; },
+      onEnd: () => {
+        hlStop = null;
+        $('hlReplay').textContent = 'REPLAY';
+        encodeHighlight();   // have it ready before they reach for SHARE
+      },
     });
   }
   function startHighlight(){
@@ -2005,39 +2011,92 @@
     gifBusy = false;
   }
   $('hlReplay').addEventListener('click', () => { if (hlSegs) playHighlight(); });
+  // Encoding takes a second or two, and navigator.share() must be called while
+  // the tap is still "live" — an await in between loses that permission and the
+  // share sheet silently refuses. So the GIF is encoded in the background as
+  // soon as the clip has played, and SHARE is instant when it matters.
+  let hlEncoding = null;
+  function hlFileName(){
+    return 'fpr-ss' + stageNo + '-' + (profile.name || 'racer').toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.gif';
+  }
+  function encodeHighlight(){
+    if (hlBytes || hlEncoding || !hlSegs) return hlEncoding || Promise.resolve(hlBytes);
+    hlEncoding = new Promise(resolve => {
+      setTimeout(() => {
+        try {
+          const cv = document.createElement('canvas');
+          cv.width = 320; cv.height = 240;
+          const { frames, fps } = FPRClip.renderClip(cv, hlSegs.stage, hlSegs.segs, { fps: 11, zoom: 0.6 });
+          hlBytes = FPRClip.encodeGif(frames, cv.width, cv.height, 1000 / fps, { maxColors: 96 });
+        } catch (e){ hlBytes = null; }
+        hlEncoding = null;
+        const kb = hlBytes ? Math.round(hlBytes.length / 1024) : 0;
+        if (hlBytes) $('hlSave').textContent = 'SAVE ' + kb + 'KB';
+        resolve(hlBytes);
+      }, 60);
+    });
+    return hlEncoding;
+  }
+  function hlFile(){
+    return new File([hlBytes], hlFileName(), { type: 'image/gif' });
+  }
+  function saveHighlight(){
+    if (!hlBytes) return;
+    const blob = new Blob([hlBytes], { type: 'image/gif' });
+    const a2 = document.createElement('a');
+    a2.href = URL.createObjectURL(blob);
+    a2.download = hlFileName();
+    a2.click();
+    setTimeout(() => URL.revokeObjectURL(a2.href), 8000);
+    toast('Saved (' + Math.round(hlBytes.length / 1024) + ' KB)');
+  }
+
   $('hlShare').addEventListener('click', async () => {
     if (!hlSegs) return;
     const btn = $('hlShare');
+    // Ready? Share inside the tap, so the sheet actually opens.
+    if (hlBytes && navigator.canShare && navigator.canShare({ files: [hlFile()] })){
+      try {
+        await navigator.share({ files: [hlFile()],
+          title: 'Food Pyramid Rally',
+          text: 'Food Pyramid Rally · SS #' + stageNo + ' — ' + fmt(lastTimeMs) +
+                (lastRank ? ' · P' + lastRank : '') });
+      } catch (e){ if (e && e.name !== 'AbortError') toast('Share cancelled.'); }
+      return;
+    }
     btn.disabled = true;
-    const label = btn.textContent;
-    try {
-      if (!hlBytes){
-        btn.textContent = 'rendering…';
-        await new Promise(r => setTimeout(r, 30));
-        const cv = document.createElement('canvas');
-        cv.width = 320; cv.height = 240;
-        const { frames, fps } = FPRClip.renderClip(cv, hlSegs.stage, hlSegs.segs, { fps: 11, zoom: 0.6 });
-        btn.textContent = 'encoding…';
-        await new Promise(r => setTimeout(r, 30));
-        hlBytes = { bytes: FPRClip.encodeGif(frames, cv.width, cv.height, 1000 / fps, { maxColors: 96 }) };
-      }
-      const name = 'fpr-ss' + stageNo + '-' + (profile.name || 'racer').toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.gif';
-      const file = new File([hlBytes.bytes], name, { type: 'image/gif' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })){
-        await navigator.share({ files: [file],
-          text: 'Food Pyramid Rally · SS #' + stageNo + ' — ' + fmt(lastTimeMs) });
-      } else {
-        const blob = new Blob([hlBytes.bytes], { type: 'image/gif' });
-        const a2 = document.createElement('a');
-        a2.href = URL.createObjectURL(blob);
-        a2.download = name;
-        a2.click();
-        setTimeout(() => URL.revokeObjectURL(a2.href), 8000);
-        toast('Saved (' + Math.round(hlBytes.bytes.length / 1024) + ' KB)');
-      }
-    } catch (e){ if (e && e.name !== 'AbortError') toast('Share failed: ' + e.message); }
-    btn.textContent = label;
+    btn.textContent = 'preparing…';
+    await encodeHighlight();
+    btn.textContent = 'SHARE';
     btn.disabled = false;
+    if (!hlBytes){ toast('Could not build the clip.'); return; }
+    // The tap is stale now, so a share sheet may be refused — try, then fall
+    // back to saving rather than leaving them with nothing.
+    if (navigator.canShare && navigator.canShare({ files: [hlFile()] })){
+      try {
+        await navigator.share({ files: [hlFile()],
+          title: 'Food Pyramid Rally',
+          text: 'Food Pyramid Rally · SS #' + stageNo + ' — ' + fmt(lastTimeMs) });
+        return;
+      } catch (e){
+        if (e && e.name === 'AbortError') return;
+        toast('Tap SHARE again to pick an app.');
+        return;
+      }
+    }
+    saveHighlight();   // desktop, or a browser without the share sheet
+  });
+
+  $('hlSave').addEventListener('click', async () => {
+    const btn = $('hlSave');
+    if (!hlBytes){
+      btn.disabled = true;
+      btn.textContent = 'preparing…';
+      await encodeHighlight();
+      btn.disabled = false;
+      btn.textContent = hlBytes ? 'SAVE ' + Math.round(hlBytes.length / 1024) + 'KB' : 'SAVE';
+    }
+    saveHighlight();
   });
 
   function dayInfo(ds){
