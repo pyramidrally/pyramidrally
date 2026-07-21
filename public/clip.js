@@ -219,6 +219,9 @@
                 "Straight through the good stuff."],
     whoa:      ["Oh, into the fryer — that'll cost them.",
                 "Picks up something heavy there.", "That's the wrong thing to eat."],
+    tunnel:    ["Into the tunnel — walls either side now.",
+                "Underground, and no room for error in there.",
+                "Diving into the dark. Commit, or scrape."],
     heavy:     ["Carrying a full load — look at the size of it.",
                 "Eaten everything on the stage, and it shows.",
                 "Wallowing through here, absolutely stuffed."],
@@ -270,7 +273,12 @@
     const rel = i => (i - start) * dtMs;
     const bridges = stage.bridges || [];
     const onBridge = j => bridges.some(([a, b]) => j >= a && j <= b);
-    const ramps = (stage.ramps || []).map(r => r.i);
+    const tunnels = stage.tunnels || [];
+    const inTunnel = j => tunnels.some(([a, b]) => j >= a && j <= b);
+    // the ramp only covers half the road, so ask the shared rule rather than
+    // guessing from nearness — otherwise a car on the far half gets called for
+    // air it never got
+    const jumpTimes = findJumps(path, dtMs, stage);
 
     // opener
     const openKey = !driver ? 'open'
@@ -297,7 +305,8 @@
       let kind = null;
       if (gap > 4 && onBridge(j)) kind = 'splash';
       else if (gap > 10) kind = 'off';
-      else if (ramps.some(r => Math.abs(r - j) <= 1) && sp > 200) kind = 'jump';
+      else if (jumpTimes.some(jt => Math.abs(jt - i * dtMs) < 260)) kind = 'jump';
+      else if (inTunnel(j) && i > 0 && !inTunnel(path[(i - 1) * 3 + 2])) kind = 'tunnel';
       else if (onBridge(j) && lastKind !== 'bridge') kind = 'bridge';
       else if (curve > 0.0050) kind = 'pin' + dir;
       else if (curve > 0.0022) kind = 'hard' + dir;
@@ -306,7 +315,9 @@
 
       if (!kind || kind === lastKind) continue;
       // incidents always get called, scenery only if there is room
-      const urgent = kind === 'splash' || kind === 'off' || kind === 'jump';
+      // entering a tunnel is a moment, not scenery — it should not be dropped
+      // just because a corner was mentioned a second ago
+      const urgent = kind === 'splash' || kind === 'off' || kind === 'jump' || kind === 'tunnel';
       if (urgent) {
         // an incident interrupts scenery, but never so fast that the previous
         // line flashes past unread — push it back instead
@@ -598,11 +609,12 @@
     for (let pass = 0; pass < 2; pass++) {
       for (let i = lo; i < hi; i++) {
         const br = onBridge(i);
+        const tn = (stage.tunnels || []).some(([a, b]) => i >= a && i <= b);
         ctx.beginPath();
         ctx.moveTo(pts[i][0], pts[i][1]);
         ctx.lineTo(pts[i + 1][0], pts[i + 1][1]);
-        if (pass === 0) { ctx.strokeStyle = br ? '#8a6a44' : '#b9cfa1'; ctx.lineWidth = widths[i] * 2 + 12; }
-        else { ctx.strokeStyle = br ? '#eedaae' : '#ffffff'; ctx.lineWidth = widths[i] * 2; }
+        if (pass === 0) { ctx.strokeStyle = br ? '#8a6a44' : tn ? '#3f3a33' : '#b9cfa1'; ctx.lineWidth = widths[i] * 2 + 12; }
+        else { ctx.strokeStyle = br ? '#eedaae' : tn ? '#8d8577' : '#ffffff'; ctx.lineWidth = widths[i] * 2; }
         ctx.stroke();
       }
     }
@@ -613,6 +625,25 @@
         ctx.beginPath();
         ctx.arc(pts[i][0] + nx * w * s, pts[i][1] + ny * w * s, 6, 0, Math.PI * 2);
         ctx.fill();
+      }
+    }
+    // tunnel roof and mouths
+    for (const [ta, tb] of (stage.tunnels || [])) {
+      const s0 = Math.max(ta - 1, lo), e0 = Math.min(tb + 1, hi);
+      if (s0 < e0) {
+        ctx.strokeStyle = '#6b6357'; ctx.lineWidth = 250; ctx.lineCap = 'round';
+        ctx.beginPath();
+        for (let i = s0; i <= e0; i++) i === s0 ? ctx.moveTo(pts[i][0], pts[i][1]) : ctx.lineTo(pts[i][0], pts[i][1]);
+        ctx.stroke();
+      }
+      for (const i of [ta, tb]) {
+        if (i < lo || i > hi) continue;
+        const [tnx, tny] = normals[i], tw = widths[i] + 22, tp = pts[i];
+        ctx.strokeStyle = '#4a443b'; ctx.lineWidth = 16;
+        ctx.beginPath();
+        ctx.moveTo(tp[0] - tnx * tw, tp[1] - tny * tw);
+        ctx.lineTo(tp[0] + tnx * tw, tp[1] + tny * tw);
+        ctx.stroke();
       }
     }
     // jump ramps — the yellow bar and its arrow
@@ -888,7 +919,6 @@
 
     const bridges = stage.bridges || [];
     const onBridge = j => bridges.some(([a, b]) => j >= a && j <= b);
-    const ramps = (stage.ramps || []).map(r => r.i);
     const jumps = findJumps(path, dtMs, stage);
     const ate = simulateEating(path, dtMs, stage, jumps);
 
@@ -906,7 +936,7 @@
 
       if (gap > 4 && onBridge(j)) per.splash[i] += 6;
       if (gap > 18) per.off[i] += Math.min(gap / 40, 3);
-      if (ramps.some(r => Math.abs(r - j) <= 1) && sp > 200) per.air[i] += 5;
+      if (jumps.some(jt => Math.abs(jt - i * dtMs) < 260)) per.air[i] += 5;
       if (curve > 0.0035 && sp > 150) per.sideways[i] += curve * 400 * Math.min(sp / 300, 1.4);
       if (sp > 320) per.charge[i] += (sp - 320) / 90;
       // waddling round fully loaded is funny, but it lasts for whole seconds

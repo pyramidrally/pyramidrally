@@ -65,12 +65,20 @@ const MAX_SPD = 430, BOOST = 1.5;
 // must match STRICT_FROM in public/index.html
 const STRICT_FROM = '2026-07-22';
 const floorCache = new Map();
-// The shortest line a car could legally drive — not the centreline, which
-// nobody drives. Start on the centreline and repeatedly pull each point toward
-// the straight line between its neighbours, clamped to stay on the road: the
-// string goes taut through the corridor. On a twisty stage that is 10-17%
-// shorter than the centreline, and a floor built on the centreline would have
-// rejected a genuinely brilliant run.
+// The shortest line a car could get away with. Start on the centreline and
+// repeatedly pull each point toward the straight line between its neighbours,
+// clamped to stay inside the corridor: the string goes taut.
+//
+// The corridor is NOT the painted road. Going off course only resets you past
+// roadW + OFF_COURSE_PAD, so there is a wide grass margin you may cut through
+// and keep the time. Clever drivers use it, and they should — this floor exists
+// to reject fabricated times, not to punish anyone for driving well.
+//
+// The margin is taken in full, and then a generous factor on top, because being
+// wrong in this direction throws away a real run while being wrong the other way
+// merely lets a silly time through, which is visible on the board anyway.
+const OFF_COURSE_PAD = 110;
+const FLOOR_SLACK = 0.75;
 function shortestLegalLine(t) {
   const a = t.START_I, b = t.FINISH_I;
   const p = [];
@@ -79,7 +87,8 @@ function shortestLegalLine(t) {
     for (let i = 1; i < p.length - 1; i++) {
       const tx = (p[i - 1][0] + p[i + 1][0]) / 2, ty = (p[i - 1][1] + p[i + 1][1]) / 2;
       let nx = p[i][0] + (tx - p[i][0]) * 0.5, ny = p[i][1] + (ty - p[i][1]) * 0.5;
-      const ci = a + i, cx = t.pts[ci][0], cy = t.pts[ci][1], lim = t.widths[ci] * 0.92;
+      const ci = a + i, cx = t.pts[ci][0], cy = t.pts[ci][1];
+      const lim = t.widths[ci] * 0.92 + OFF_COURSE_PAD;
       const dx = nx - cx, dy = ny - cy, d = Math.hypot(dx, dy);
       if (d > lim) { nx = cx + dx / d * lim; ny = cy + dy / d * lim; }
       p[i][0] = nx; p[i][1] = ny;
@@ -102,7 +111,7 @@ function minPlausibleMs(date) {
     v = LEGACY_FLOOR_MS;
   } else {
     try {
-      v = Math.round((shortestLegalLine(stageGen.buildStage(date)) / (MAX_SPD * BOOST)) * 1000 * 0.95);
+      v = Math.round((shortestLegalLine(stageGen.buildStage(date)) / (MAX_SPD * BOOST)) * 1000 * FLOOR_SLACK);
     } catch (e) {
       v = 15000;
     }

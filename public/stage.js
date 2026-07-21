@@ -273,11 +273,12 @@
   const STAGE_PX = (FINISH_I - START_I) * STEP;
   // how many of each thing this stage gets
   const COUNTS = (() => {
-    if (!varied) return { bridges: 2, ramps: 5, waters: 2 };
+    if (!varied) return { bridges: 2, ramps: 5, waters: 2, tunnels: 0 };
     const r = mulberry32(SW[7] ^ 0x1eaf);
     const scale = STAGE_PX / 13536;            // relative to the old fixed length
     return {
       bridges: Math.max(1, Math.min(3, Math.round((1 + Math.floor(r() * 3)) * scale))),
+      tunnels: Math.min(2, Math.floor(r() * 3)),      // 0-2: not every stage has one
       ramps: Math.max(2, Math.round((3 + Math.floor(r() * 5)) * scale)),
       waters: Math.max(1, Math.min(3, Math.round((1 + Math.floor(r() * 3)) * scale))),
     };
@@ -363,7 +364,7 @@
   });
 
 
-  const ramps = [], bridges = [];
+  const ramps = [], bridges = [], tunnels = [];
   {
     const r = mulberry32(SW[2]);
     for (let b = 0; b < COUNTS.bridges; b++){
@@ -380,10 +381,29 @@
       }
     }
     while (bridges.length && bridges[bridges.length - 1][1] > FINISH_I - 25) bridges.pop();
+    // Tunnels: the other way through a landscape. A bridge punishes leaving it
+    // — you go in the water. A tunnel is the opposite temperament: tight walls
+    // that scrape rather than a reset, so it rewards commitment.
+    if (varied){
+      let tt = 0;
+      while (tunnels.length < COUNTS.tunnels && tt++ < 60){
+        const s = Math.floor(START_I + 45 + r() * (FINISH_I - START_I - 140));
+        const e = s + 20 + Math.floor(r() * 16);
+        if (e > FINISH_I - 30) continue;
+        if (bridges.some(([a, b]) => s < b + 25 && e > a - 25)) continue;
+        if (tunnels.some(([a, b]) => s < b + 25 && e > a - 25)) continue;
+        tunnels.push([s, e]);
+      }
+      tunnels.sort((a, b) => a[0] - b[0]);
+    }
     let tries = 0;
     while (ramps.length < COUNTS.ramps && tries++ < 80 + COUNTS.ramps * 16){
       const i = Math.floor(START_I + 30 + r() * (FINISH_I - START_I - 70));
       if (bridges.some(([a, b]) => i > a - 8 && i < b + 8)) continue;
+      // A jump carries ~250px. Eight points is only 192, so a ramp that close
+      // would still have the car in the air at the tunnel mouth — under a roof.
+      // Legacy stages have no tunnels, so this cannot move their ramps.
+      if (tunnels.some(([a, b]) => i > a - 14 && i < b + 14)) continue;
       if (ramps.some(r0 => Math.abs(r0.i - i) < 25)) continue;
       ramps.push({ i, side: r() < 0.5 ? -1 : 1 });
     }
@@ -521,7 +541,7 @@
 
 
     return { pts, widths, normals, bridges, ramps, foods, stones, decor, patches, waters,
-             cuisine, NPTS, STEP, START_I, FINISH_I, STAGE_PX, COUNTS, SW };
+             cuisine, NPTS, STEP, START_I, FINISH_I, STAGE_PX, COUNTS, tunnels, SW };
   }
 
   root.buildStage = buildStage;
