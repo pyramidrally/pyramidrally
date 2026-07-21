@@ -2983,19 +2983,25 @@
         name: e.n, time: (e.t / 1000).toFixed(2) + 's', face: e.f, path: e.p,
         rank: i + 1, isLast: i === entries.length - 1,
       }));
-      const cast = FPRClip.buildCast(all, stage, { dtMs: 150, seconds: 4.2, cast: 4 });
+      const reel = j.reel;
+      const cast = (reel && reel.cast && reel.cast.length)
+        ? reel.cast.map(c => ({ entry: all[c.rank - 1], start: c.start, end: c.end, badge: c.badge }))
+                   .filter(c => c.entry && c.entry.path).slice(0, 4)
+        : FPRClip.buildCast(all, stage, { dtMs: 150, seconds: 4.2, cast: 4 });
       if (!cast.length) return;
       const info = dayInfo(d);
-      const segs = cast.map(c => {
+      const aiLines = (reel && reel.lines) || null;
+      const segs = cast.map((c, k) => {
         const e = c.entry;
         return {
           path: e.path, dtMs: 150, start: c.start, end: c.end,
           face: e.face,
-          lines: FPRClip.commentate({
-            path: e.path, dtMs: 150, stage, start: c.start, end: c.end,
-            driver: { name: e.name, rank: e.rank, pos: 'P' + e.rank, date: d,
-                      time: e.time, isLast: e.isLast },
-          }),
+          lines: (aiLines && aiLines[k] && aiLines[k].length) ? aiLines[k]
+            : FPRClip.commentate({
+                path: e.path, dtMs: 150, stage, start: c.start, end: c.end,
+                driver: { name: e.name, rank: e.rank, pos: 'P' + e.rank, date: d,
+                          time: e.time, isLast: e.isLast },
+              }),
           caption: 'P' + e.rank + ' · ' + e.name + ' · ' + e.time,
           sub: info ? info.label : d,
           badge: c.badge,

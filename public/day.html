@@ -311,7 +311,14 @@
         name: e.n, time: (e.t / 1000).toFixed(2) + 's', face: e.f, path: e.p,
         rank: i + 1, isLast: i === (j.entries.length - 1), t: e.t,
       }));
-      const cast = FPRClip.buildCast(all, stage, { dtMs: 150, seconds: SEG_SECONDS, cast: CAST_SIZE });
+      // The server casts the reel and, once a stage has closed, has commentary
+      // written for it. Use that when it is there: everyone then sees the same
+      // reel with the same words, and it was paid for once.
+      const reel = j.reel;
+      const cast = (reel && reel.cast && reel.cast.length)
+        ? reel.cast.map(c => ({ entry: all[c.rank - 1], start: c.start, end: c.end, badge: c.badge }))
+                   .filter(c => c.entry && c.entry.path)
+        : FPRClip.buildCast(all, stage, { dtMs: 150, seconds: SEG_SECONDS, cast: CAST_SIZE });
       if (!cast.length){
         $('reelOut').innerHTML = '<div class="note">No recorded runs survive for this stage.</div>';
         btn.textContent = original; btn.disabled = false; return;
@@ -319,15 +326,17 @@
       const cv = document.createElement('canvas');
       cv.width = 320; cv.height = 240;
       const info = stageInfo(date);
-      const segs = cast.map(c => {
+      const aiLines = (reel && reel.lines) || null;
+      const segs = cast.map((c, k) => {
         const e = c.entry;
-        const lines = FPRClip.commentate({
-          path: e.path, dtMs: 150, stage, start: c.start, end: c.end,
-          driver: {
-            name: e.name, rank: e.rank, pos: ord(e.rank), date: date,
-            time: e.time, isLast: e.isLast,
-          },
-        });
+        const lines = (aiLines && aiLines[k] && aiLines[k].length) ? aiLines[k]
+          : FPRClip.commentate({
+              path: e.path, dtMs: 150, stage, start: c.start, end: c.end,
+              driver: {
+                name: e.name, rank: e.rank, pos: ord(e.rank), date: date,
+                time: e.time, isLast: e.isLast,
+              },
+            });
         return {
           path: e.path, dtMs: 150, start: c.start, end: c.end,
           face: e.face, lines,

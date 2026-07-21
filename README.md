@@ -121,6 +121,34 @@ paid instance (attach a 1 GB disk; the existing `leaderboard.json` just works).
 Without any of these the game still works — boards simply reset whenever the
 free instance restarts.
 
+## AI commentary (optional)
+
+The daily highlight reel can have its commentary written by Claude instead of
+by the built-in phrase pools, which gives the reel some variety once regulars
+start recognising the stock lines.
+
+Set `ANTHROPIC_API_KEY` on Render to turn it on. `ANTHROPIC_MODEL` is optional
+and defaults to a small, cheap model.
+
+How it is kept cheap and safe:
+
+* **Once per stage, not once per viewer.** The reel is cast on the server and
+  the commentary written once, after the stage closes and its results can no
+  longer change. It is cached with that day's board and served to everybody, so
+  a day costs a few hundred tokens no matter how many people watch.
+* **Only for the daily reel.** Personal highlights stay deterministic — those
+  would be one call per run per player.
+* **The telemetry decides what happened; the model only picks words.** It is
+  handed a list of moments already extracted from the recorded lines and never
+  sees raw positions. Any line referring to a clip it wasn't given is discarded,
+  so it cannot invent a crash.
+* **Driver names are untrusted.** They are stripped of control characters and
+  braces, length-capped, passed as data, and the prompt says not to obey them.
+* **It is never load-bearing.** No key, a slow call, an error, or an answer that
+  doesn't parse — any of these fall back to the built-in commentator. A reel
+  never waits on the API, and never fails to appear because of it.
+
+
 ## Files
 - `server.js` — Express + WebSocket: live positions, global daily leaderboard, start-queue marshal, crew codes, QR endpoint
 - `public/index.html` — the whole game
@@ -130,6 +158,7 @@ free instance restarts.
 - `public/stage.js` — stage, foods, rocks and scenery, GENERATED from index.html by make_stage_js.py
 - `public/og.png` — link-preview image (regenerate with make_og.py)
 - `auth.js` — Google ID token verification + stateless sessions
+- `ai.js` — optional AI commentary for the daily reel (dormant without `ANTHROPIC_API_KEY`)
 
 Nutrition framing is based on NIH "We Can!" GO/SLOW/WHOA, WHO healthy-diet
 guidance, USDA MyPlate and Harvard's Nutrition Source. It's a game, not

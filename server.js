@@ -13,6 +13,8 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
 const auth = require('./auth');
+const ai = require('./ai');
+const clipEngine = require('./public/clip.js');
 const stageGen = require('./public/stage.js');
 
 const PORT = process.env.PORT || 3000;
@@ -173,13 +175,14 @@ async function saveRemote() {
 
 // store = { boards: {date: [entry]}, users: {sub: {name, joined}}, months: {'YYYY-MM': [standing]} }
 // entry = { n: name, t: ms, p?: ghost path, f?: face, u?: google sub }
-let store = { boards: {}, users: {}, months: {} };
+let store = { boards: {}, users: {}, months: {}, ai: {} };
 function adoptStore(raw) {
   if (!raw || typeof raw !== 'object') return;
   if (raw.boards && typeof raw.boards === 'object') {
     store.boards = raw.boards;
     store.users = raw.users || {};
     store.months = raw.months || {};
+    store.ai = raw.ai || {};
   } else {
     store.boards = raw; // migrate the old shape (bare date → entries map)
   }
@@ -375,6 +378,7 @@ app.get('/api/day', (req, res) => {
   const d = String(req.query.d || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return res.status(400).json({ error: 'bad date' });
   const withClips = req.query.clips === '1';
+  if (withClips) ensureCommentary(d);
   const raw = store.boards[d] || [];
   const entries = raw.map((e, i) => ({
     n: e.n, t: e.t, f: e.f,
@@ -384,7 +388,8 @@ app.get('/api/day', (req, res) => {
     p: withClips && e.p ? e.p : undefined,   // only when a reel is being built
   }));
   const days = Object.keys(store.boards).filter(k => (store.boards[k] || []).length).sort();
-  res.json({ date: d, today: today(), entries, total: entries.length, days });
+  res.json({ date: d, today: today(), entries, total: entries.length, days,
+             reel: withClips ? reelPayload(d) : undefined });
 });
 
 app.get('/api/monthly', (req, res) => {
@@ -443,6 +448,67 @@ function sanitizeFace(f) {
   f = f || {};
   const paint = typeof f.paint === 'string' && /^[0-8]{0,324}$/.test(f.paint) ? f.paint : '';
   return { color: COLORS.includes(f.color) ? f.color : COLORS[0], paint };
+}
+
+// ---------- the daily highlight reel ----------
+// Cast on the SERVER so every viewer sees the same reel, and so the commentary
+// can be written once for the day rather than once per viewer. The casting and
+// scoring in public/clip.js are plain functions with no DOM, so they run here
+// unchanged — browser and server cannot disagree about the reel.
+const REEL_CAST = 6, REEL_SECONDS = 4.6;
+
+function castFor(date) {
+  const board = store.boards[date] || [];
+  if (!board.length) return null;
+  let stage;
+  try { stage = stageGen.buildStage(date); } catch (e) { return null; }
+  const entries = board.map((e, i) => ({
+    name: e.n, time: (e.t / 1000).toFixed(2) + 's', face: e.f, path: e.p,
+    rank: i + 1, isLast: i === board.length - 1,
+  }));
+  const cast = clipEngine.buildCast(entries, stage, { dtMs: 150, seconds: REEL_SECONDS, cast: REEL_CAST });
+  if (!cast || !cast.length) return null;
+  return { stage, cast };
+}
+
+function reelPayload(date) {
+  const built = castFor(date);
+  if (!built) return null;
+  const cached = store.ai[date];
+  return {
+    cast: built.cast.map(c => ({
+      rank: c.entry.rank, start: c.start, end: c.end, badge: c.badge, kind: c.kind,
+    })),
+    lines: (cached && cached.lines) || null,
+    ai: !!(cached && cached.lines),
+  };
+}
+
+// Written once, for a stage that has closed and can no longer change. Runs in
+// the background: a reel must never wait on an API call, and must still appear
+// if the call never succeeds.
+const aiPending = new Set();
+function ensureCommentary(date) {
+  if (!ai.enabled() || date >= today() || store.ai[date] || aiPending.has(date)) return;
+  const built = castFor(date);
+  if (!built) return;
+  aiPending.add(date);
+  const info = stageInfo(date);
+  const segments = built.cast.map(c => ({
+    name: c.entry.name, rank: c.entry.rank, time: c.entry.time,
+    isLast: c.entry.isLast, kind: c.kind, start: c.start, end: c.end, dtMs: 150,
+  }));
+  ai.writeCommentary(info.label, info.cuisine, segments)
+    .then(lines => {
+      aiPending.delete(date);
+      if (!lines) return;
+      store.ai[date] = { lines, at: Date.now() };
+      const keys = Object.keys(store.ai).sort();
+      while (keys.length > 20) delete store.ai[keys.shift()];
+      saveBoards();
+      console.log('  AI commentary written for ' + date);
+    })
+    .catch(() => aiPending.delete(date));
 }
 
 // ---------- the service-park start queue ----------
@@ -680,6 +746,7 @@ server.listen(PORT, () => {
   console.log(`  Play at:  http://localhost:${PORT}`);
   console.log(`  Leaderboard storage: ${storageMode === 'file' ? 'local file (resets on redeploy — see README)' : storageMode + ' (persistent)'}`);
   console.log(`  Accounts: ${auth.enabled() ? 'Google Sign-In enabled' : 'disabled (set GOOGLE_CLIENT_ID to enable)'}`);
+  console.log(`  Commentary: ${ai.enabled() ? 'AI (' + ai.MODEL + ')' : 'built-in (set ANTHROPIC_API_KEY for AI)'}`);
   console.log('');
 });
 
