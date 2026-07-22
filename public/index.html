@@ -2332,9 +2332,20 @@
       }
     }
     // Remember the last place we were legitimately on the road, so leaving it
-    // can never gain ground.
+    // can never gain ground. Only bank it when the index is moving forward by a
+    // sane step: where the track folds back on itself — a tunnel hairpin, say —
+    // the nearest point can flick to the OTHER arm while we are still on this
+    // one, and banking that arm's index would let a later cut respawn ahead.
     if (onRoad && me.z === 0){
-      lastOn.x = me.x; lastOn.y = me.y; lastOn.a = me.angle; lastOn.i = idx; lastOn.has = true;
+      const step = lastOn.has ? idx - lastOn.i : 1;
+      const sane = !lastOn.has || (step >= 0 && step <= 4);
+      if (sane){
+        lastOn.x = me.x; lastOn.y = me.y; lastOn.a = me.angle; lastOn.i = idx; lastOn.has = true;
+      } else {
+        // still on tarmac, just don't trust this index — keep the position
+        // fresh so a respawn lands where we actually are, but hold the index
+        lastOn.x = me.x; lastOn.y = me.y; lastOn.a = me.angle;
+      }
     }
     // Inside a tunnel there is no grass to go off onto — there are walls. Clip
     // one and you lose speed and get pushed back on, rather than being reset.
@@ -2358,7 +2369,8 @@
       // the chord across a corner and you were dropped back on AHEAD of where
       // you left. Go back to where the road was last under the wheels instead.
       if (strictRules && lastOn.has){
-        me.x = lastOn.x; me.y = lastOn.y; me.angle = lastOn.a; idx = lastOn.i;
+        me.x = lastOn.x; me.y = lastOn.y; me.angle = lastOn.a;
+        idx = Math.min(idx, lastOn.i);   // never forward, only back
       } else {
         me.x = pts[idx][0]; me.y = pts[idx][1]; me.angle = trackDir(idx);
       }
@@ -2374,7 +2386,8 @@
     if (me.z === 0 && !onRoad && overWater(me.x, me.y)){
       burst(me.x, me.y, '#5bd1ff', 22);
       if (strictRules && lastOn.has){
-        me.x = lastOn.x; me.y = lastOn.y; me.angle = lastOn.a; idx = lastOn.i;
+        me.x = lastOn.x; me.y = lastOn.y; me.angle = lastOn.a;
+        idx = Math.min(idx, lastOn.i);   // never forward, only back
       } else {
         me.x = pts[idx][0]; me.y = pts[idx][1]; me.angle = trackDir(idx);
       }
@@ -2613,6 +2626,30 @@
 
     drawBand(START_I, '#2fae4e', 'START');
     drawBand(FINISH_I, '#23331f', 'FINISH');
+    // when the line must be crossed the correct way, show which way that is:
+    // three chevrons on the road pointing across the line in the finish
+    // direction, so nobody drifts over it from the wrong side and wonders why
+    // the run didn't count
+    if (strictRules){
+      const fd = trackDir(FINISH_I);
+      const [fpx, fpy] = pts[FINISH_I];
+      const back = FINISH_I - 5;
+      const [bpx, bpy] = pts[Math.max(back, 0)];
+      for (let c = 0; c < 3; c++){
+        const t = 0.30 + c * 0.22;
+        const cx = bpx + (fpx - bpx) * t, cy = bpy + (fpy - bpy) * t;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(fd);
+        ctx.globalAlpha = 0.45 + c * 0.12;
+        ctx.strokeStyle = '#23331f'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(-9, -11); ctx.lineTo(9, 0); ctx.lineTo(-9, 11);
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+    }
 
     // Service park & pit lane labels — drawn AFTER the road so it can never
     // paint over them, and pushed outward along the track normal (a fixed
