@@ -190,7 +190,10 @@
                 "{n} now — watch how early they get on the power."],
     openMid:   ["{n} next, {p} on the day.",
                 "Here's {n}, running {p}.",
-                "{n} now — solid run, {p} overall."],
+                "{n} now — a tidy run, {p} overall."],
+    openBack:  ["{n} next, down in {p}.",
+                "Here's {n}, {p} and with work to do.",
+                "{n} now — {p}, off the pace today."],
     openLast:  ["{n} last home, but home.",
                 "And {n}, who took the scenic route.",
                 "{n} to finish — not the fastest, but they finished."],
@@ -281,9 +284,16 @@
     const jumpTimes = findJumps(path, dtMs, stage);
 
     // opener
+    // "solid run, P11" is wrong when P11 was last of eleven. Judge by where in
+    // the field they came, not just their number: the field size tells us
+    // whether a position is a good one. Last home always gets the sign-off
+    // pool; the back third gets its own, more honest, opener.
+    const field = driver && driver.field ? driver.field : 0;
+    const frac = field > 1 && driver ? (driver.rank - 1) / (field - 1) : 0;
     const openKey = !driver ? 'open'
       : driver.rank === 1 ? 'openFirst'
-      : driver.isLast ? 'openLast'
+      : (driver.isLast || (field && driver.rank === field)) ? 'openLast'
+      : (field && frac >= 0.66) ? 'openBack'
       : driver.pos ? 'openMid' : 'open';
     out.push({ t: 0, text: fill(pick(openKey), driver) });
 

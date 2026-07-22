@@ -533,11 +533,11 @@ function castFor(date) {
   try { stage = stageGen.buildStage(date); } catch (e) { return null; }
   const entries = board.map((e, i) => ({
     name: e.n, time: (e.t / 1000).toFixed(2) + 's', face: e.f, path: e.p,
-    rank: i + 1, isLast: i === board.length - 1,
+    rank: i + 1, isLast: i === board.length - 1, field: board.length,
   }));
   const cast = clipEngine.buildCast(entries, stage, { dtMs: 150, seconds: REEL_SECONDS, cast: REEL_CAST });
   if (!cast || !cast.length) return null;
-  return { stage, cast };
+  return { stage, cast, field: board.length };
 }
 
 function reelPayload(date) {
@@ -565,7 +565,8 @@ function ensureCommentary(date) {
   const info = stageInfo(date);
   const segments = built.cast.map(c => ({
     name: c.entry.name, rank: c.entry.rank, time: c.entry.time,
-    isLast: c.entry.isLast, kind: c.kind, start: c.start, end: c.end, dtMs: 150,
+    isLast: c.entry.isLast, field: built.field, kind: c.kind,
+    start: c.start, end: c.end, dtMs: 150,
   }));
   ai.writeCommentary(info.label, info.cuisine, segments)
     .then(lines => {
