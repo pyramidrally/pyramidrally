@@ -3054,7 +3054,18 @@
         name: e.n, time: (e.t / 1000).toFixed(2) + 's', face: e.f, path: e.p,
         rank: i + 1, isLast: i === entries.length - 1,
       }));
-      const reel = j.reel;
+      let reel = j.reel;
+      // If the server is still writing the AI lines (they land a few seconds
+      // after the stage closes), the first fetch comes back with the cast but
+      // reel.ai false. Give it one quiet retry so the reel that plays is the
+      // AI one, not the built-in fallback frozen in on the first load.
+      if (reel && reel.cast && reel.cast.length && !reel.ai && FPRClip){
+        await new Promise(r => setTimeout(r, 3500));
+        try {
+          const j2 = await fetch('/api/day?d=' + d + '&clips=1').then(r => r.json());
+          if (j2 && j2.reel && j2.reel.ai) reel = j2.reel;
+        } catch (e) {}
+      }
       const cast = (reel && reel.cast && reel.cast.length)
         ? reel.cast.map(c => ({ entry: all[c.rank - 1], start: c.start, end: c.end, badge: c.badge }))
                    .filter(c => c.entry && c.entry.path).slice(0, 4)

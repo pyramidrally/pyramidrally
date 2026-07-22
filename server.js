@@ -810,6 +810,22 @@ setInterval(() => {
   });
 }, 15000);
 
+// Warm yesterday's commentary as soon as we can, and again after each UTC
+// midnight, so the reel is ready BEFORE anyone opens the menu. Lazily writing
+// it on first view meant the first visitor after a restart always saw the
+// built-in lines, and on the free tier a restart happens after every idle nap.
+function warmCommentary() {
+  if (!ai.enabled()) return;
+  const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  ensureCommentary(y);
+}
+setTimeout(warmCommentary, 4000);          // shortly after boot
+let lastWarmDay = today();
+setInterval(() => {
+  const d = today();
+  if (d !== lastWarmDay) { lastWarmDay = d; setTimeout(warmCommentary, 3000); }
+}, 60000);
+
 server.listen(PORT, () => {
   console.log('');
   console.log('  🍏 FOOD PYRAMID RALLY server running!');
