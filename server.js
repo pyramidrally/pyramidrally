@@ -695,9 +695,12 @@ wss.on('connection', (ws) => {
     }
     if (m.t === 'pos') {
       const x = Number(m.x), y = Number(m.y), sz = Number(m.sz);
+      const z = Number(m.z), hd = Number(m.hd);
       if (Number.isFinite(x) && Number.isFinite(y)) {
-        c.live = { x: Math.round(x), y: Math.round(y), sz: Math.min(4, Math.max(0, sz | 0)) };
-        for (const w of c.watchers) send(w, { t: 'drv', x: c.live.x, y: c.live.y, sz: c.live.sz });
+        c.live = { x: Math.round(x), y: Math.round(y), sz: Math.min(4, Math.max(0, sz | 0)),
+                   z: Number.isFinite(z) ? Math.round(z) : 0,
+                   hd: Number.isFinite(hd) ? Math.round(hd * 100) / 100 : 0 };
+        for (const w of c.watchers) send(w, { t: 'drv', x: c.live.x, y: c.live.y, sz: c.live.sz, z: c.live.z, hd: c.live.hd });
       }
       return;
     }
@@ -796,7 +799,7 @@ function liveCount() {
 
 setInterval(() => {
   const list = [];
-  for (const [id, c] of clients) if (c.live) list.push([id, c.live.x, c.live.y, c.live.sz]);
+  for (const [id, c] of clients) if (c.live) list.push([id, c.live.x, c.live.y, c.live.sz, c.live.z || 0, c.live.hd || 0]);
   // s: when this snapshot was taken. Clients place positions on THIS timeline
   // rather than on arrival time, so network jitter doesn't become visible
   // wobble in how the cars move.

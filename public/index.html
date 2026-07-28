@@ -1324,10 +1324,11 @@
           clockOffset = (clockOffset === null) ? gap : Math.min(clockOffset + 0.02, gap);
         }
         const stamp = m.s ? m.s + (clockOffset === null ? 0 : clockOffset) : now;
-        for (const [id, x, y, sz] of m.l){
+        for (const [id, x, y, sz, zz, hdd] of m.l){
           if (id === myId) continue;
           const o = others.get(id) || { n: '???', face: { color:'#7ddb6a', paint:'' }, x, y };
           o.tx = x; o.ty = y; o.sz = sz; o.seen = now;
+          o.z = zz; if (hdd) o.serverHd = hdd;
           if (o.x === undefined){ o.x = x; o.y = y; }
           if (!o.buf) o.buf = [];
           const last = o.buf[o.buf.length - 1];
@@ -1526,33 +1527,56 @@
     if (!HAS_SERVER || dateStr < '2026-07-22') return;
     try {
       const j = await fetch('/api/wear?d=' + dateStr).then(r => r.json());
-      if (j && j.runs > 0 && j.lat && j.n) wear = j;
+      if (j && j.runs > 0 && j.lat && j.n){ wear = j; bakeWear(); }
     } catch (e) {}
   }
-  function drawWear(ctx, lo, hi){
-    if (!wear) return;
+  // The marks never change once loaded, so bake them once into an offscreen
+  // canvas in world coordinates and blit that each frame. Re-stroking ~40
+  // alpha-varying segments every frame is what made the driven stages lag.
+  let wearCanvas = null, wearBounds = null;
+  function bakeWear(){
+    if (!wear || !wear.lat) return;
     const { lat, n } = wear;
-    ctx.save();
-    ctx.lineCap = 'round';
-    for (let i = Math.max(lo, 1); i < hi; i++){
-      const c = n[i] | 0;
-      if (!c) continue;
-      const w = widths[i];
-      const off = (lat[i] / 100) * w;
-      const [nx, ny] = normals[i];
-      const [ax, ay] = pts[i], [bx, by] = pts[i + 1] || pts[i];
-      // two thin streaks, a car's width apart, along the average line taken
-      const a = Math.min(0.085, 0.02 + c * 0.006);
-      ctx.strokeStyle = 'rgba(90,106,78,' + a.toFixed(3) + ')';
-      ctx.lineWidth = 9;
-      for (const side of [-11, 11]){
-        ctx.beginPath();
-        ctx.moveTo(ax + nx * (off + side), ay + ny * (off + side));
-        ctx.lineTo(bx + nx * (off + side), by + ny * (off + side));
-        ctx.stroke();
+    let minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9;
+    for (let i = 1; i < NPTS; i++){
+      if (!n[i]) continue;
+      const w = widths[i], off = (lat[i] / 100) * w, [nx, ny] = normals[i];
+      for (const s of [-20, 20]){
+        const x = pts[i][0] + nx * (off + s), y = pts[i][1] + ny * (off + s);
+        if (x < minx) minx = x; if (x > maxx) maxx = x;
+        if (y < miny) miny = y; if (y > maxy) maxy = y;
       }
     }
-    ctx.restore();
+    if (maxx < minx) return;                       // no wear anywhere
+    const pad = 20;
+    minx -= pad; miny -= pad; maxx += pad; maxy += pad;
+    const cw = Math.ceil(maxx - minx), ch = Math.ceil(maxy - miny);
+    if (cw <= 0 || ch <= 0 || cw > 8000 || ch > 8000) return;
+    const cv = document.createElement('canvas');
+    cv.width = cw; cv.height = ch;
+    const g = cv.getContext('2d');
+    g.translate(-minx, -miny);
+    g.lineCap = 'round';
+    for (let i = 1; i < NPTS; i++){
+      const c = n[i] | 0;
+      if (!c) continue;
+      const w = widths[i], off = (lat[i] / 100) * w, [nx, ny] = normals[i];
+      const [ax, ay] = pts[i], [bx, by] = pts[i + 1] || pts[i];
+      const a = Math.min(0.085, 0.02 + c * 0.006);
+      g.strokeStyle = 'rgba(90,106,78,' + a.toFixed(3) + ')';
+      g.lineWidth = 9;
+      for (const side of [-11, 11]){
+        g.beginPath();
+        g.moveTo(ax + nx * (off + side), ay + ny * (off + side));
+        g.lineTo(bx + nx * (off + side), by + ny * (off + side));
+        g.stroke();
+      }
+    }
+    wearCanvas = cv; wearBounds = { x: minx, y: miny };
+  }
+  function drawWear(ctx){
+    if (!wearCanvas) return;
+    ctx.drawImage(wearCanvas, wearBounds.x, wearBounds.y);
   }
 
   // ============ input ============
@@ -2461,7 +2485,7 @@
     posAcc += dt * 1000;
     if (posAcc >= 125){
       posAcc = 0;
-      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'pos', x: me.x, y: me.y, sz: me.size }));
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'pos', x: me.x, y: me.y, sz: me.size, z: me.z || 0, hd: me.angle || 0 }));
     }
 
     // checkpoint deltas vs PB (or world best)
@@ -2551,7 +2575,7 @@
       }
     }
 
-    drawWear(ctx, lo, hi);
+    drawWear(ctx);
 
     // tunnel mouths
     for (const [a, b] of tunnels){
@@ -2797,12 +2821,26 @@
       if (o.tx === undefined || nowP - (o.seen || 0) > 2500) continue;
       const dx = o.x - camX, dy = o.y - camY;
       if (Math.abs(dx) > W/2 + 60 || Math.abs(dy) > H/2 + 60) continue;
-      ctx.save(); ctx.translate(o.x, o.y);
-      drawFace(ctx, o.face || { color:'#7ddb6a', paint:'' }, BASE_R + (o.sz||0)*5, o.sz||0, 0.65, o.hd);
+      const oz = o.z || 0;
+      // shadow (flattened when airborne, like the local car)
+      ctx.save();
+      ctx.translate(o.x + 4, o.y + 6);
+      ctx.globalAlpha = oz > 0 ? 0.22 : 0.16;
+      ctx.fillStyle = '#23331f';
+      const sr = BASE_R + (o.sz||0)*5;
+      ctx.beginPath();
+      if (oz > 0) ctx.ellipse(0, 0, sr, sr*0.6, 0, 0, Math.PI*2);
+      else ctx.arc(0, 0, sr, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+      const hd = (o.serverHd != null ? o.serverHd : o.hd) || 0;
+      ctx.save(); ctx.translate(o.x, o.y - oz * 0.55);
+      const lift = 1 + oz / 450;
+      drawFace(ctx, o.face || { color:'#7ddb6a', paint:'' }, (BASE_R + (o.sz||0)*5) * lift, o.sz||0, 0.85, hd);
       ctx.restore();
       ctx.font = '700 11px Rubik, sans-serif';
       ctx.fillStyle = 'rgba(35,51,31,.75)';
-      ctx.fillText(o.n || '', o.x, o.y - (BASE_R + (o.sz||0)*5) - 9);
+      ctx.fillText(o.n || '', o.x, o.y - (BASE_R + (o.sz||0)*5) - 9 - oz * 0.55);
     }
 
     // a note over the holding area, so a huddle of cars reads as a queue
