@@ -278,7 +278,7 @@
     const scale = STAGE_PX / 13536;            // relative to the old fixed length
     return {
       bridges: Math.max(1, Math.min(3, Math.round((1 + Math.floor(r() * 3)) * scale))),
-      tunnels: Math.min(2, Math.floor(r() * 3)),      // 0-2: not every stage has one
+      tunnels: 0,   // tunnels removed — too heavy to render; bridges only
       ramps: Math.max(2, Math.round((3 + Math.floor(r() * 5)) * scale)),
       waters: Math.max(1, Math.min(3, Math.round((1 + Math.floor(r() * 3)) * scale))),
     };
@@ -381,34 +381,60 @@
       }
     }
     while (bridges.length && bridges[bridges.length - 1][1] > FINISH_I - 25) bridges.pop();
-    // Tunnels: the other way through a landscape. A bridge punishes leaving it
-    // — you go in the water. A tunnel is the opposite temperament: tight walls
-    // that scrape rather than a reset, so it rewards commitment.
-    if (varied){
-      let tt = 0;
-      while (tunnels.length < COUNTS.tunnels && tt++ < 60){
-        const s = Math.floor(START_I + 45 + r() * (FINISH_I - START_I - 140));
-        const e = s + 20 + Math.floor(r() * 16);
-        if (e > FINISH_I - 30) continue;
-        if (bridges.some(([a, b]) => s < b + 25 && e > a - 25)) continue;
-        if (tunnels.some(([a, b]) => s < b + 25 && e > a - 25)) continue;
-        tunnels.push([s, e]);
-      }
-      tunnels.sort((a, b) => a[0] - b[0]);
-    }
+    // Tunnels were removed — expensive to render, and their hairpins let people
+    // cut. Bridges are the only terrain feature now.
     let tries = 0;
     while (ramps.length < COUNTS.ramps && tries++ < 80 + COUNTS.ramps * 16){
       const i = Math.floor(START_I + 30 + r() * (FINISH_I - START_I - 70));
       if (bridges.some(([a, b]) => i > a - 8 && i < b + 8)) continue;
-      // A jump carries ~250px. Eight points is only 192, so a ramp that close
-      // would still have the car in the air at the tunnel mouth — under a roof.
-      // Legacy stages have no tunnels, so this cannot move their ramps.
-      if (tunnels.some(([a, b]) => i > a - 14 && i < b + 14)) continue;
       if (ramps.some(r0 => Math.abs(r0.i - i) < 25)) continue;
       ramps.push({ i, side: r() < 0.5 ? -1 : 1 });
     }
   }
   function onBridge(i){ return bridges.some(([a, b]) => i >= a && i <= b); }
+
+  // Hairpin guards: where the track turns back sharply, the inside of the bend
+  // is the tempting cut. From the varied stages on, drop a rock or a tree just
+  // off the inside edge there, so cutting means hitting something. Cosmetic
+  // trees are decor; these are real stones with collision, tagged so the
+  // renderer can also draw a tree over some of them.
+  const guards = [];
+  if (varied){
+    const gr = mulberry32(SW[4] ^ 0x9a1c);
+    for (let i = START_I + 6; i < FINISH_I - 6; i++){
+      // turn angle across a few points
+      const a0 = Math.atan2(pts[i][1] - pts[i-3][1], pts[i][0] - pts[i-3][0]);
+      const a1 = Math.atan2(pts[i+3][1] - pts[i][1], pts[i+3][0] - pts[i][0]);
+      let turn = a1 - a0; while (turn > Math.PI) turn -= 2*Math.PI; while (turn < -Math.PI) turn += 2*Math.PI;
+      if (Math.abs(turn) < 0.5) continue;                 // only real corners
+      if (onBridge(i)) continue;
+      if (ramps.some(rp => Math.abs(rp.i - i) < 6)) continue;
+      if (guards.some(g => Math.abs(g.i - i) < 10)) continue;
+      // inside of the bend is the side the track is turning towards
+      const side = turn > 0 ? 1 : -1;
+      const [nx, ny] = normals[i], w = widths[i];
+      const s = 17 + gr() * 6;
+      // Sit it just past the inside edge — but at a hairpin the OTHER arm of the
+      // track is close, so a naive offset can land the guard on real road. Test
+      // the exact position against the whole track and only keep it if the guard
+      // (with its body) clears every lane. Nudge outward until it does, give up
+      // if it never clears.
+      let placed = null;
+      for (let m = 0; m < 6; m++){
+        const off = side * (w + 20 + m * 14 + gr() * 8);
+        const x = pts[i][0] + nx * off, y = pts[i][1] + ny * off;
+        let clear = true;
+        for (let j = 0; j < NPTS; j++){
+          const dx = pts[j][0] - x, dy = pts[j][1] - y;
+          if (dx*dx + dy*dy < (widths[j] + s + 6) * (widths[j] + s + 6)){ clear = false; break; }
+        }
+        if (clear){ placed = { x, y }; break; }
+      }
+      if (!placed) continue;
+      guards.push({ i, x: placed.x, y: placed.y, s, tree: gr() < 0.5, a: gr() * Math.PI });
+    }
+  }
+
 
   // real obstacles: stones on the road
   const stones = [];
@@ -424,6 +450,8 @@
       const off = (r() * 2 - 1) * w * 0.7;
       stones.push({ x: px + nx * off, y: py + ny * off, a: r() * Math.PI, s: 14 + r() * 7 });
     }
+    // hairpin guards collide exactly like stones
+    for (const g of guards) stones.push({ x: g.x, y: g.y, a: g.a, s: g.s, guard: true, tree: g.tree });
   }
 
 

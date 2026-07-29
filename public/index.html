@@ -708,7 +708,7 @@
     const scale = STAGE_PX / 13536;            // relative to the old fixed length
     return {
       bridges: Math.max(1, Math.min(3, Math.round((1 + Math.floor(r() * 3)) * scale))),
-      tunnels: Math.min(2, Math.floor(r() * 3)),      // 0-2: not every stage has one
+      tunnels: 0,   // tunnels removed — too heavy to render; bridges only
       ramps: Math.max(2, Math.round((3 + Math.floor(r() * 5)) * scale)),
       waters: Math.max(1, Math.min(3, Math.round((1 + Math.floor(r() * 3)) * scale))),
     };
@@ -897,34 +897,60 @@
       }
     }
     while (bridges.length && bridges[bridges.length - 1][1] > FINISH_I - 25) bridges.pop();
-    // Tunnels: the other way through a landscape. A bridge punishes leaving it
-    // — you go in the water. A tunnel is the opposite temperament: tight walls
-    // that scrape rather than a reset, so it rewards commitment.
-    if (varied){
-      let tt = 0;
-      while (tunnels.length < COUNTS.tunnels && tt++ < 60){
-        const s = Math.floor(START_I + 45 + r() * (FINISH_I - START_I - 140));
-        const e = s + 20 + Math.floor(r() * 16);
-        if (e > FINISH_I - 30) continue;
-        if (bridges.some(([a, b]) => s < b + 25 && e > a - 25)) continue;
-        if (tunnels.some(([a, b]) => s < b + 25 && e > a - 25)) continue;
-        tunnels.push([s, e]);
-      }
-      tunnels.sort((a, b) => a[0] - b[0]);
-    }
+    // Tunnels were removed — expensive to render, and their hairpins let people
+    // cut. Bridges are the only terrain feature now.
     let tries = 0;
     while (ramps.length < COUNTS.ramps && tries++ < 80 + COUNTS.ramps * 16){
       const i = Math.floor(START_I + 30 + r() * (FINISH_I - START_I - 70));
       if (bridges.some(([a, b]) => i > a - 8 && i < b + 8)) continue;
-      // A jump carries ~250px. Eight points is only 192, so a ramp that close
-      // would still have the car in the air at the tunnel mouth — under a roof.
-      // Legacy stages have no tunnels, so this cannot move their ramps.
-      if (tunnels.some(([a, b]) => i > a - 14 && i < b + 14)) continue;
       if (ramps.some(r0 => Math.abs(r0.i - i) < 25)) continue;
       ramps.push({ i, side: r() < 0.5 ? -1 : 1 });
     }
   }
   function onBridge(i){ return bridges.some(([a, b]) => i >= a && i <= b); }
+
+  // Hairpin guards: where the track turns back sharply, the inside of the bend
+  // is the tempting cut. From the varied stages on, drop a rock or a tree just
+  // off the inside edge there, so cutting means hitting something. Cosmetic
+  // trees are decor; these are real stones with collision, tagged so the
+  // renderer can also draw a tree over some of them.
+  const guards = [];
+  if (varied){
+    const gr = mulberry32(SW[4] ^ 0x9a1c);
+    for (let i = START_I + 6; i < FINISH_I - 6; i++){
+      // turn angle across a few points
+      const a0 = Math.atan2(pts[i][1] - pts[i-3][1], pts[i][0] - pts[i-3][0]);
+      const a1 = Math.atan2(pts[i+3][1] - pts[i][1], pts[i+3][0] - pts[i][0]);
+      let turn = a1 - a0; while (turn > Math.PI) turn -= 2*Math.PI; while (turn < -Math.PI) turn += 2*Math.PI;
+      if (Math.abs(turn) < 0.5) continue;                 // only real corners
+      if (onBridge(i)) continue;
+      if (ramps.some(rp => Math.abs(rp.i - i) < 6)) continue;
+      if (guards.some(g => Math.abs(g.i - i) < 10)) continue;
+      // inside of the bend is the side the track is turning towards
+      const side = turn > 0 ? 1 : -1;
+      const [nx, ny] = normals[i], w = widths[i];
+      const s = 17 + gr() * 6;
+      // Sit it just past the inside edge — but at a hairpin the OTHER arm of the
+      // track is close, so a naive offset can land the guard on real road. Test
+      // the exact position against the whole track and only keep it if the guard
+      // (with its body) clears every lane. Nudge outward until it does, give up
+      // if it never clears.
+      let placed = null;
+      for (let m = 0; m < 6; m++){
+        const off = side * (w + 20 + m * 14 + gr() * 8);
+        const x = pts[i][0] + nx * off, y = pts[i][1] + ny * off;
+        let clear = true;
+        for (let j = 0; j < NPTS; j++){
+          const dx = pts[j][0] - x, dy = pts[j][1] - y;
+          if (dx*dx + dy*dy < (widths[j] + s + 6) * (widths[j] + s + 6)){ clear = false; break; }
+        }
+        if (clear){ placed = { x, y }; break; }
+      }
+      if (!placed) continue;
+      guards.push({ i, x: placed.x, y: placed.y, s, tree: gr() < 0.5, a: gr() * Math.PI });
+    }
+  }
+
 
   // real obstacles: stones on the road
   const stones = [];
@@ -940,6 +966,8 @@
       const off = (r() * 2 - 1) * w * 0.7;
       stones.push({ x: px + nx * off, y: py + ny * off, a: r() * Math.PI, s: 14 + r() * 7 });
     }
+    // hairpin guards collide exactly like stones
+    for (const g of guards) stones.push({ x: g.x, y: g.y, a: g.a, s: g.s, guard: true, tree: g.tree });
   }
 
   // water shields: grab one → junk-proof for 3 seconds
@@ -1516,72 +1544,6 @@
   // Sound was removed: a driving game played one-handed on a phone, usually
   // muted, where the engine drone added nothing and the iPhone silent switch
   // killed it half the time anyway. The calls are gone rather than stubbed.
-
-  // ============ track wear ============
-  // Faint marks where today's cars actually went, so a stage that has been
-  // driven looks driven. Deliberately barely there: strong enough to notice
-  // the racing line, weak enough that food and scenery still read clearly.
-  // Purely cosmetic — it never touches the physics.
-  let wear = null;
-  async function loadWear(){
-    if (!HAS_SERVER || dateStr < '2026-07-22') return;
-    try {
-      const j = await fetch('/api/wear?d=' + dateStr).then(r => r.json());
-      if (j && j.runs > 0 && j.lat && j.n){ wear = j; bakeWear(); }
-    } catch (e) {}
-  }
-  // The marks never change once loaded, so bake them once into an offscreen
-  // canvas in world coordinates and blit that each frame. Re-stroking ~40
-  // alpha-varying segments every frame is what made the driven stages lag.
-  let wearCanvas = null, wearBounds = null;
-  // which segments are inside a tunnel — computed once, not per segment per
-  // frame with tunnels.some()
-  const segTunnel = new Uint8Array(NPTS);
-  for (const [a, b] of tunnels) for (let i = a; i <= b && i < NPTS; i++) segTunnel[i] = 1;
-  function bakeWear(){
-    if (!wear || !wear.lat) return;
-    const { lat, n } = wear;
-    let minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9;
-    for (let i = 1; i < NPTS; i++){
-      if (!n[i]) continue;
-      const w = widths[i], off = (lat[i] / 100) * w, [nx, ny] = normals[i];
-      for (const s of [-20, 20]){
-        const x = pts[i][0] + nx * (off + s), y = pts[i][1] + ny * (off + s);
-        if (x < minx) minx = x; if (x > maxx) maxx = x;
-        if (y < miny) miny = y; if (y > maxy) maxy = y;
-      }
-    }
-    if (maxx < minx) return;                       // no wear anywhere
-    const pad = 20;
-    minx -= pad; miny -= pad; maxx += pad; maxy += pad;
-    const cw = Math.ceil(maxx - minx), ch = Math.ceil(maxy - miny);
-    if (cw <= 0 || ch <= 0 || cw > 8000 || ch > 8000) return;
-    const cv = document.createElement('canvas');
-    cv.width = cw; cv.height = ch;
-    const g = cv.getContext('2d');
-    g.translate(-minx, -miny);
-    g.lineCap = 'round';
-    for (let i = 1; i < NPTS; i++){
-      const c = n[i] | 0;
-      if (!c) continue;
-      const w = widths[i], off = (lat[i] / 100) * w, [nx, ny] = normals[i];
-      const [ax, ay] = pts[i], [bx, by] = pts[i + 1] || pts[i];
-      const a = Math.min(0.085, 0.02 + c * 0.006);
-      g.strokeStyle = 'rgba(90,106,78,' + a.toFixed(3) + ')';
-      g.lineWidth = 9;
-      for (const side of [-11, 11]){
-        g.beginPath();
-        g.moveTo(ax + nx * (off + side), ay + ny * (off + side));
-        g.lineTo(bx + nx * (off + side), by + ny * (off + side));
-        g.stroke();
-      }
-    }
-    wearCanvas = cv; wearBounds = { x: minx, y: miny };
-  }
-  function drawWear(ctx){
-    if (!wearCanvas) return;
-    ctx.drawImage(wearCanvas, wearBounds.x, wearBounds.y);
-  }
 
   // ============ input ============
   const keys = {};
@@ -2375,23 +2337,7 @@
         lastOn.x = me.x; lastOn.y = me.y; lastOn.a = me.angle;
       }
     }
-    // Inside a tunnel there is no grass to go off onto — there are walls. Clip
-    // one and you lose speed and get pushed back on, rather than being reset.
-    // Punishing enough to matter, forgiving enough to keep the throttle open.
-    const inTunnel = tunnels.some(([a, b]) => idx >= a && idx <= b);
-    if (me.z === 0 && inTunnel && dist > roadW * 0.95){
-      const [nx0, ny0] = normals[idx], p0 = pts[idx];
-      const lat = (me.x - p0[0]) * nx0 + (me.y - p0[1]) * ny0;
-      const wall = roadW * 0.95 * (lat < 0 ? -1 : 1);
-      me.x = p0[0] + nx0 * wall; me.y = p0[1] + ny0 * wall;
-      me.speed *= 0.55; me.vx *= 0.55; me.vy *= 0.55;
-      if (!(me.scrapeT > 0)){
-        burst(me.x, me.y, '#c9c2b4', 8);
-        me.scrapeT = 0.35;
-      }
-    }
-    if (me.scrapeT > 0) me.scrapeT -= dt;
-    if (me.z === 0 && !inTunnel && dist > roadW + 110){
+    if (me.z === 0 && dist > roadW + 110){
       burst(me.x, me.y, '#b9cfa1', 16);
       // Putting the car on the nearest centreline point rewarded cutting: drive
       // the chord across a corner and you were dropped back on AHEAD of where
@@ -2579,35 +2525,12 @@
       }
     }
 
-    drawWear(ctx);
-
-    // tunnel mouths
-    for (const [a, b] of tunnels){
-      for (const i of [a, b]){
-        if (i < lo || i > hi) continue;
-        const [nx, ny] = normals[i], w = widths[i] + 22, p = pts[i];
-        ctx.strokeStyle = '#4a443b'; ctx.lineWidth = 16; ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(p[0] - nx * w, p[1] - ny * w);
-        ctx.lineTo(p[0] + nx * w, p[1] + ny * w);
-        ctx.stroke();
-      }
-    }
     // water under bridge sections
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (const [a, b] of bridges){
       const s = Math.max(a - 2, lo), e = Math.min(b + 2, hi);
       if (s >= e) continue;
       ctx.strokeStyle = '#a5d9ec'; ctx.lineWidth = WATER_HALF * 2; // physics reads the same number
-      ctx.beginPath();
-      for (let i = s; i <= e; i++) i === s ? ctx.moveTo(pts[i][0], pts[i][1]) : ctx.lineTo(pts[i][0], pts[i][1]);
-      ctx.stroke();
-    }
-    // tunnel roof, under the road so the surface reads as running into it
-    for (const [a, b] of tunnels){
-      const s = Math.max(a - 1, lo), e = Math.min(b + 1, hi);
-      if (s >= e) continue;
-      ctx.strokeStyle = '#6b6357'; ctx.lineWidth = 250;
       ctx.beginPath();
       for (let i = s; i <= e; i++) i === s ? ctx.moveTo(pts[i][0], pts[i][1]) : ctx.lineTo(pts[i][0], pts[i][1]);
       ctx.stroke();
@@ -2619,12 +2542,11 @@
     for (let pass = 0; pass < 2; pass++){
       let gi = lo;
       while (gi < hi){
-        const br = onBridge(gi), tn = segTunnel[gi];
-        const col = pass === 0 ? (br ? '#8a6a44' : tn ? '#3f3a33' : '#b9cfa1')
-                               : (br ? '#eedaae' : tn ? '#8d8577' : '#ffffff');
+        const br = onBridge(gi);
+        const col = pass === 0 ? (br ? '#8a6a44' : '#b9cfa1') : (br ? '#eedaae' : '#ffffff');
         const lw = pass === 0 ? widths[gi] * 2 + 12 : widths[gi] * 2;
         let gj = gi + 1;
-        while (gj < hi && onBridge(gj) === br && segTunnel[gj] === tn &&
+        while (gj < hi && onBridge(gj) === br &&
                (pass === 0 ? widths[gj] * 2 + 12 : widths[gj] * 2) === lw) gj++;
         ctx.strokeStyle = col; ctx.lineWidth = lw;
         ctx.beginPath();
@@ -2802,6 +2724,14 @@
     for (const st of stones){
       const dxs = st.x - camX, dys = st.y - camY;
       if (Math.abs(dxs) > W/2 + 50 || Math.abs(dys) > H/2 + 50) continue;
+      // a guard tree draws as a tree emoji rather than a rock, but collides the
+      // same — it is still in the stones list
+      if (st.tree){
+        ctx.font = (st.s * 2.6 | 0) + 'px serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+        ctx.fillText('🌲', st.x, st.y + st.s * 0.9);
+        continue;
+      }
       ctx.save(); ctx.translate(st.x, st.y); ctx.rotate(st.a);
       ctx.fillStyle = 'rgba(0,0,0,.18)';
       ctx.beginPath(); ctx.ellipse(3, 4, st.s, st.s * 0.8, 0, 0, Math.PI * 2); ctx.fill();
@@ -3240,7 +3170,6 @@
   initAuth();
   loadMonth();
   loadYesterdayReel();
-  loadWear();
 })();
 </script>
 </body>
