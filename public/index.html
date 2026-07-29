@@ -2480,65 +2480,57 @@
   }
 
   // ============ render ============
-  function render(now){
-    ctx.clearRect(0, 0, W, H);
-    if (!me){ ctx.fillStyle = '#dcecc9'; ctx.fillRect(0, 0, W, H); return; }
-    ctx.save();
-    if (wobbleT > 0) ctx.translate((Math.random()-.5)*wobbleT*26, (Math.random()-.5)*wobbleT*26);
-    ctx.fillStyle = '#dcecc9';
-    ctx.fillRect(0, 0, W, H);
-    ctx.translate(W/2 - camX, H/2 - camY);
+  // Everything that never moves during a run, drawn in world space into the
+  // given context. Culls against the context's tile bounds (g.__vx0..) so each
+  // tile only pays for what it contains. This is the exact content that used to
+  // be redrawn every frame; now it is baked once per tile.
+  function paintStatic(g){
+    const vx0 = g.__vx0 - 200, vy0 = g.__vy0 - 200, vx1 = g.__vx1 + 200, vy1 = g.__vy1 + 200;
+    const inView = (x, y, pad) => x > vx0 - pad && x < vx1 + pad && y > vy0 - pad && y < vy1 + pad;
+    let lo = NPTS, hi = 0;
+    for (let i = 0; i < NPTS; i++){
+      if (pts[i][0] > vx0 - 260 && pts[i][0] < vx1 + 260 && pts[i][1] > vy0 - 260 && pts[i][1] < vy1 + 260){
+        if (i < lo) lo = i; if (i > hi) hi = i;
+      }
+    }
+    lo = Math.max(0, lo - 2); hi = Math.min(NPTS - 1, hi + 2);
 
-    // soft grass patches for depth
-    ctx.fillStyle = 'rgba(158,199,126,.4)';
+    g.fillStyle = 'rgba(158,199,126,.4)';
     for (const p of patches){
-      const dx = p.x - camX, dy = p.y - camY;
-      if (Math.abs(dx) > W/2 + 140 || Math.abs(dy) > H/2 + 140) continue;
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+      if (!inView(p.x, p.y, p.r)) continue;
+      g.beginPath(); g.arc(p.x, p.y, p.r, 0, Math.PI * 2); g.fill();
     }
 
-    // visible index range around player
-    const lo = Math.max(0, idx - 90), hi = Math.min(NPTS - 1, idx + 130);
-
-    // service park apron + pit lane out to the track
     {
       const [ax, ay] = parkSlot(-0.9);
-      if (Math.abs(ax - camX) < W + 500 && Math.abs(ay - camY) < H + 500){
+      if (inView(ax, ay, 900)){
         const [bx2, by2] = parkSlot(7.4);
         const [tx2, ty2] = pts[13];
         const cx3 = (ax + tx2) / 2 + normals[9][0] * -40;
         const cy3 = (ay + ty2) / 2 + normals[9][1] * -40;
         for (const [col, wid] of [['#c9d1bd', 78], ['#e6ead9', 66]]){
-          ctx.strokeStyle = col; ctx.lineWidth = wid; ctx.lineCap = 'round';
-          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx2, by2); ctx.stroke();
+          g.strokeStyle = col; g.lineWidth = wid; g.lineCap = 'round';
+          g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx2, by2); g.stroke();
         }
         for (const [col, wid] of [['#c9d1bd', 52], ['#e6ead9', 42]]){
-          ctx.strokeStyle = col; ctx.lineWidth = wid; ctx.lineCap = 'round';
-          ctx.beginPath(); ctx.moveTo(ax, ay);
-          ctx.quadraticCurveTo(cx3, cy3, tx2, ty2);
-          ctx.stroke();
+          g.strokeStyle = col; g.lineWidth = wid; g.lineCap = 'round';
+          g.beginPath(); g.moveTo(ax, ay); g.quadraticCurveTo(cx3, cy3, tx2, ty2); g.stroke();
         }
-        // guide arrows along the pit lane
-        ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 4; ctx.setLineDash([12, 16]);
-        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.quadraticCurveTo(cx3, cy3, tx2, ty2); ctx.stroke();
-        ctx.setLineDash([]);
+        g.strokeStyle = '#ffd23f'; g.lineWidth = 4; g.setLineDash([12, 16]);
+        g.beginPath(); g.moveTo(ax, ay); g.quadraticCurveTo(cx3, cy3, tx2, ty2); g.stroke();
+        g.setLineDash([]);
       }
     }
 
-    // water under bridge sections
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    g.lineCap = 'round'; g.lineJoin = 'round';
     for (const [a, b] of bridges){
       const s = Math.max(a - 2, lo), e = Math.min(b + 2, hi);
       if (s >= e) continue;
-      ctx.strokeStyle = '#a5d9ec'; ctx.lineWidth = WATER_HALF * 2; // physics reads the same number
-      ctx.beginPath();
-      for (let i = s; i <= e; i++) i === s ? ctx.moveTo(pts[i][0], pts[i][1]) : ctx.lineTo(pts[i][0], pts[i][1]);
-      ctx.stroke();
+      g.strokeStyle = '#a5d9ec'; g.lineWidth = WATER_HALF * 2;
+      g.beginPath();
+      for (let i = s; i <= e; i++) i === s ? g.moveTo(pts[i][0], pts[i][1]) : g.lineTo(pts[i][0], pts[i][1]);
+      g.stroke();
     }
-    // road: two passes (outline then surface). Group consecutive segments that
-    // share a colour and width into a single stroked polyline, so a stretch of
-    // plain road is one path rather than ~40 — the per-segment stroke was the
-    // single biggest cost in the frame.
     for (let pass = 0; pass < 2; pass++){
       let gi = lo;
       while (gi < hi){
@@ -2548,16 +2540,14 @@
         let gj = gi + 1;
         while (gj < hi && onBridge(gj) === br &&
                (pass === 0 ? widths[gj] * 2 + 12 : widths[gj] * 2) === lw) gj++;
-        ctx.strokeStyle = col; ctx.lineWidth = lw;
-        ctx.beginPath();
-        ctx.moveTo(pts[gi][0], pts[gi][1]);
-        for (let i = gi + 1; i <= gj; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-        ctx.stroke();
+        g.strokeStyle = col; g.lineWidth = lw;
+        g.beginPath();
+        g.moveTo(pts[gi][0], pts[gi][1]);
+        for (let i = gi + 1; i <= gj; i++) g.lineTo(pts[i][0], pts[i][1]);
+        g.stroke();
         gi = gj;
       }
     }
-    // edge ticks, grouped into three colours so the whole verge is three fills
-    // rather than an arc+fill per tick
     {
       const groups = { '#7a5c3a': [], '#ff8c2e': [], '#2fae4e': [] };
       for (let i = lo; i < hi; i += 2){
@@ -2570,17 +2560,159 @@
         }
       }
       for (const col in groups){
-        const g = groups[col];
-        if (!g.length) continue;
-        ctx.fillStyle = col;
-        ctx.beginPath();
-        for (let p = 0; p < g.length; p += 2){
-          ctx.moveTo(g[p] + 5, g[p+1]);
-          ctx.arc(g[p], g[p+1], 5, 0, Math.PI * 2);
-        }
-        ctx.fill();
+        const arr = groups[col];
+        if (!arr.length) continue;
+        g.fillStyle = col;
+        g.beginPath();
+        for (let p = 0; p < arr.length; p += 2){ g.moveTo(arr[p] + 5, arr[p+1]); g.arc(arr[p], arr[p+1], 5, 0, Math.PI * 2); }
+        g.fill();
       }
     }
+
+    paintBand(g, START_I, '#2fae4e', 'START', lo, hi);
+    paintBand(g, FINISH_I, '#23331f', 'FINISH', lo, hi);
+    if (strictRules && FINISH_I >= lo && FINISH_I <= hi){
+      const fd = trackDir(FINISH_I);
+      const [fpx, fpy] = pts[FINISH_I];
+      const [bpx, bpy] = pts[Math.max(FINISH_I - 5, 0)];
+      for (let c = 0; c < 3; c++){
+        const t = 0.30 + c * 0.22;
+        g.save(); g.translate(bpx + (fpx - bpx) * t, bpy + (fpy - bpy) * t); g.rotate(fd);
+        g.globalAlpha = 0.45 + c * 0.12;
+        g.strokeStyle = '#23331f'; g.lineWidth = 5; g.lineCap = 'round';
+        g.beginPath(); g.moveTo(-9, -11); g.lineTo(9, 0); g.lineTo(-9, 11); g.stroke();
+        g.restore();
+      }
+      g.globalAlpha = 1;
+    }
+
+    {
+      const [ax, ay] = parkSlot(-0.9);
+      if (inView(ax, ay, 900)){
+        g.save();
+        g.font = '800 12px Rubik, sans-serif';
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.lineJoin = 'round'; g.lineWidth = 4;
+        g.strokeStyle = 'rgba(255,255,255,.9)'; g.fillStyle = '#6a7a5e';
+        const label = (txt, p) => { g.strokeText(txt, p[0], p[1]); g.fillText(txt, p[0], p[1]); };
+        label('SERVICE PARK', parkLabels.park);
+        label('PIT OUT ➜', parkLabels.pit);
+        g.restore();
+      }
+    }
+    g.strokeStyle = 'rgba(47,174,78,.35)'; g.setLineDash([8, 10]); g.lineWidth = 3;
+    for (const cp of CPS){
+      if (cp < lo || cp > hi) continue;
+      const [nx, ny] = normals[cp], w = widths[cp];
+      g.beginPath();
+      g.moveTo(pts[cp][0] - nx*w, pts[cp][1] - ny*w);
+      g.lineTo(pts[cp][0] + nx*w, pts[cp][1] + ny*w);
+      g.stroke();
+    }
+    g.setLineDash([]);
+
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    for (const d of decor){
+      if (!inView(d.x, d.y, 60)) continue;
+      g.font = d.s + 'px sans-serif';
+      g.fillText(d.e, d.x, d.y);
+    }
+    for (const cb of crowds){
+      if (!inView(cb.x, cb.y, 20)) continue;
+      g.fillStyle = cb.c;
+      g.beginPath(); g.arc(cb.x, cb.y, cb.s, 0, Math.PI * 2); g.fill();
+    }
+    for (const rp of ramps){
+      if (rp.i < lo || rp.i > hi) continue;
+      const [nx, ny] = normals[rp.i], w = widths[rp.i], [px, py] = pts[rp.i];
+      const a = rp.side < 0 ? -0.92 : 0.06, b = rp.side < 0 ? -0.06 : 0.92;
+      g.strokeStyle = '#ffd23f'; g.lineWidth = 16;
+      g.beginPath(); g.moveTo(px + nx * w * a, py + ny * w * a); g.lineTo(px + nx * w * b, py + ny * w * b); g.stroke();
+      const mid = (a + b) / 2;
+      const j = Math.min(rp.i + 1, NPTS - 1);
+      const dir = Math.atan2(pts[j][1] - py, pts[j][0] - px);
+      g.save(); g.translate(px + nx * w * mid, py + ny * w * mid); g.rotate(dir);
+      g.fillStyle = '#ff8c2e';
+      g.beginPath(); g.moveTo(16, 0); g.lineTo(-7, -11); g.lineTo(-7, 11); g.closePath(); g.fill();
+      g.restore();
+    }
+    for (const st of stones){
+      if (!inView(st.x, st.y, 50)) continue;
+      if (st.tree){
+        g.font = (st.s * 2.6 | 0) + 'px serif';
+        g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+        g.fillText('🌲', st.x, st.y + st.s * 0.9);
+        continue;
+      }
+      g.save(); g.translate(st.x, st.y); g.rotate(st.a);
+      g.fillStyle = 'rgba(0,0,0,.18)';
+      g.beginPath(); g.ellipse(3, 4, st.s, st.s * 0.8, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#8f978f';
+      g.beginPath();
+      g.moveTo(-st.s, -st.s * 0.3); g.lineTo(-st.s * 0.35, -st.s); g.lineTo(st.s * 0.6, -st.s * 0.75);
+      g.lineTo(st.s, st.s * 0.25); g.lineTo(st.s * 0.35, st.s * 0.85); g.lineTo(-st.s * 0.55, st.s * 0.7);
+      g.closePath(); g.fill();
+      g.fillStyle = '#aab2aa';
+      g.beginPath();
+      g.moveTo(-st.s * 0.4, -st.s * 0.4); g.lineTo(st.s * 0.3, -st.s * 0.5); g.lineTo(st.s * 0.4, 0); g.lineTo(-st.s * 0.2, st.s * 0.15);
+      g.closePath(); g.fill();
+      g.restore();
+    }
+  }
+
+  // ============ static-world tile cache ============
+  // The road, verge, scenery, ramps and stones never move during a run, yet
+  // they were re-drawn from scratch every frame — the bulk of the per-frame
+  // cost. Bake them once, in world space, into 1024px tiles created on demand,
+  // then each frame just blit the handful of tiles under the camera. Only the
+  // moving things (cars, ghosts, food being eaten, particles) are still drawn
+  // live. Tiles are built lazily so a long stage never allocates a giant canvas.
+  const TILE = 1024;
+  const tileCache = new Map();          // "tx,ty" -> canvas
+  function tileFor(tx, ty){
+    const key = tx + ',' + ty;
+    let cv = tileCache.get(key);
+    if (cv) return cv;
+    cv = document.createElement('canvas');
+    cv.width = TILE; cv.height = TILE;
+    const g = cv.getContext('2d');
+    g.translate(-tx * TILE, -ty * TILE);   // world → this tile's local space
+    g.__vx0 = tx * TILE; g.__vy0 = ty * TILE;
+    g.__vx1 = tx * TILE + TILE; g.__vy1 = ty * TILE + TILE;
+    paintStatic(g);
+    if (tileCache.size > 40) {             // cap memory on very long stages
+      const first = tileCache.keys().next().value;
+      tileCache.delete(first);
+    }
+    tileCache.set(key, cv);
+    return cv;
+  }
+  function blitStatic(g){
+    // which tiles overlap the camera window?
+    const x0 = camX - W/2, y0 = camY - H/2, x1 = camX + W/2, y1 = camY + H/2;
+    const tx0 = Math.floor(x0 / TILE), ty0 = Math.floor(y0 / TILE);
+    const tx1 = Math.floor(x1 / TILE), ty1 = Math.floor(y1 / TILE);
+    for (let tx = tx0; tx <= tx1; tx++)
+      for (let ty = ty0; ty <= ty1; ty++)
+        g.drawImage(tileFor(tx, ty), tx * TILE, ty * TILE);
+  }
+
+  function render(now){
+    ctx.clearRect(0, 0, W, H);
+    if (!me){ ctx.fillStyle = '#dcecc9'; ctx.fillRect(0, 0, W, H); return; }
+    ctx.save();
+    if (wobbleT > 0) ctx.translate((Math.random()-.5)*wobbleT*26, (Math.random()-.5)*wobbleT*26);
+    ctx.fillStyle = '#dcecc9';
+    ctx.fillRect(0, 0, W, H);
+    ctx.translate(W/2 - camX, H/2 - camY);
+
+    // The entire static world — road, verge, scenery, ramps, stones, bands,
+    // labels — comes from pre-baked tiles in one blit per visible tile, instead
+    // of being redrawn stroke by stroke every frame.
+    blitStatic(ctx);
+
+    // visible index range around player, still needed by the dynamic layers
+    const lo = Math.max(0, idx - 90), hi = Math.min(NPTS - 1, idx + 130);
     // start & finish bands
     // tire marks from drifting
     ctx.strokeStyle = 'rgba(60,50,40,.5)'; ctx.lineWidth = 3;
@@ -2595,99 +2727,6 @@
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
-
-    drawBand(START_I, '#2fae4e', 'START');
-    drawBand(FINISH_I, '#23331f', 'FINISH');
-    // when the line must be crossed the correct way, show which way that is:
-    // three chevrons on the road pointing across the line in the finish
-    // direction, so nobody drifts over it from the wrong side and wonders why
-    // the run didn't count
-    if (strictRules){
-      const fd = trackDir(FINISH_I);
-      const [fpx, fpy] = pts[FINISH_I];
-      const back = FINISH_I - 5;
-      const [bpx, bpy] = pts[Math.max(back, 0)];
-      for (let c = 0; c < 3; c++){
-        const t = 0.30 + c * 0.22;
-        const cx = bpx + (fpx - bpx) * t, cy = bpy + (fpy - bpy) * t;
-        ctx.save();
-        ctx.translate(cx, cy);
-        ctx.rotate(fd);
-        ctx.globalAlpha = 0.45 + c * 0.12;
-        ctx.strokeStyle = '#23331f'; ctx.lineWidth = 5; ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(-9, -11); ctx.lineTo(9, 0); ctx.lineTo(-9, 11);
-        ctx.stroke();
-        ctx.restore();
-      }
-      ctx.globalAlpha = 1;
-    }
-
-    // Service park & pit lane labels — drawn AFTER the road so it can never
-    // paint over them, and pushed outward along the track normal (a fixed
-    // screen-space nudge lands on the tarmac when the stage sets off sideways).
-    {
-      const [ax, ay] = parkSlot(-0.9);
-      if (Math.abs(ax - camX) < W + 500 && Math.abs(ay - camY) < H + 500){
-        ctx.save();
-        ctx.font = '800 12px Rubik, sans-serif';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.lineJoin = 'round'; ctx.lineWidth = 4;
-        ctx.strokeStyle = 'rgba(255,255,255,.9)'; // halo keeps it legible on grass or asphalt
-        ctx.fillStyle = '#6a7a5e';
-        const label = (txt, p) => { ctx.strokeText(txt, p[0], p[1]); ctx.fillText(txt, p[0], p[1]); };
-        label('SERVICE PARK', parkLabels.park);
-        label('PIT OUT ➜', parkLabels.pit);
-        ctx.restore();
-      }
-    }
-    // checkpoint lines
-    ctx.strokeStyle = 'rgba(47,174,78,.35)'; ctx.setLineDash([8, 10]); ctx.lineWidth = 3;
-    for (const cp of CPS){
-      if (cp < lo || cp > hi) continue;
-      const [nx, ny] = normals[cp], w = widths[cp];
-      ctx.beginPath();
-      ctx.moveTo(pts[cp][0] - nx*w, pts[cp][1] - ny*w);
-      ctx.lineTo(pts[cp][0] + nx*w, pts[cp][1] + ny*w);
-      ctx.stroke();
-    }
-    ctx.setLineDash([]);
-
-    // scenery: forest, flowers, rocks, ducks
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    for (const d of decor){
-      const dx = d.x - camX, dy = d.y - camY;
-      if (Math.abs(dx) > W/2 + 60 || Math.abs(dy) > H/2 + 60) continue;
-      ctx.font = d.s + 'px sans-serif';
-      ctx.fillText(d.e, d.x, d.y);
-    }
-    // the crowd: a bobbing sea of dots
-    for (const cb of crowds){
-      const cx2 = cb.x - camX, cy2 = cb.y - camY;
-      if (Math.abs(cx2) > W/2 + 20 || Math.abs(cy2) > H/2 + 20) continue;
-      const bob = Math.sin(now * 0.008 + cb.ph) * 1.4;
-      ctx.fillStyle = cb.c;
-      ctx.beginPath(); ctx.arc(cb.x, cb.y + bob, cb.s, 0, Math.PI * 2); ctx.fill();
-    }
-
-    // jump ramps
-    for (const rp of ramps){
-      if (rp.i < lo || rp.i > hi) continue;
-      const [nx, ny] = normals[rp.i], w = widths[rp.i], [px, py] = pts[rp.i];
-      const a = rp.side < 0 ? -0.92 : 0.06, b = rp.side < 0 ? -0.06 : 0.92;
-      ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 16;
-      ctx.beginPath();
-      ctx.moveTo(px + nx * w * a, py + ny * w * a);
-      ctx.lineTo(px + nx * w * b, py + ny * w * b);
-      ctx.stroke();
-      const mid = (a + b) / 2;
-      const j = Math.min(rp.i + 1, NPTS - 1);
-      const dir = Math.atan2(pts[j][1] - py, pts[j][0] - px);
-      ctx.save(); ctx.translate(px + nx * w * mid, py + ny * w * mid); ctx.rotate(dir);
-      ctx.fillStyle = '#ff8c2e';
-      ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(-7, -11); ctx.lineTo(-7, 11); ctx.closePath(); ctx.fill();
-      ctx.restore();
-    }
 
     // foods
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -2717,40 +2756,6 @@
       ctx.lineWidth = 3; ctx.strokeStyle = '#5bd1ff'; ctx.stroke();
       ctx.font = '26px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText('💧', 0, 2);
-      ctx.restore();
-    }
-
-    // stones
-    for (const st of stones){
-      const dxs = st.x - camX, dys = st.y - camY;
-      if (Math.abs(dxs) > W/2 + 50 || Math.abs(dys) > H/2 + 50) continue;
-      // a guard tree draws as a tree emoji rather than a rock, but collides the
-      // same — it is still in the stones list
-      if (st.tree){
-        ctx.font = (st.s * 2.6 | 0) + 'px serif';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-        ctx.fillText('🌲', st.x, st.y + st.s * 0.9);
-        continue;
-      }
-      ctx.save(); ctx.translate(st.x, st.y); ctx.rotate(st.a);
-      ctx.fillStyle = 'rgba(0,0,0,.18)';
-      ctx.beginPath(); ctx.ellipse(3, 4, st.s, st.s * 0.8, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#8f978f';
-      ctx.beginPath();
-      ctx.moveTo(-st.s, -st.s * 0.3);
-      ctx.lineTo(-st.s * 0.35, -st.s);
-      ctx.lineTo(st.s * 0.6, -st.s * 0.75);
-      ctx.lineTo(st.s, st.s * 0.25);
-      ctx.lineTo(st.s * 0.35, st.s * 0.85);
-      ctx.lineTo(-st.s * 0.55, st.s * 0.7);
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#aab2aa';
-      ctx.beginPath();
-      ctx.moveTo(-st.s * 0.4, -st.s * 0.4);
-      ctx.lineTo(st.s * 0.3, -st.s * 0.5);
-      ctx.lineTo(st.s * 0.4, 0);
-      ctx.lineTo(-st.s * 0.2, st.s * 0.15);
-      ctx.closePath(); ctx.fill();
       ctx.restore();
     }
 
@@ -2886,18 +2891,19 @@
     mg.beginPath(); mg.arc(mx, my, 6, 0, Math.PI*2); mg.fill();
     mg.strokeStyle = '#fff'; mg.lineWidth = 2; mg.stroke();
   }
-  function drawBand(i, color, label){
+  function paintBand(g, i, color, label, lo, hi){
+    if (i < lo || i > hi) return;
     const [nx, ny] = normals[i], w = widths[i];
     const [px, py] = pts[i];
-    ctx.save();
-    ctx.strokeStyle = color; ctx.lineWidth = 12;
-    ctx.beginPath();
-    ctx.moveTo(px - nx*w, py - ny*w); ctx.lineTo(px + nx*w, py + ny*w);
-    ctx.stroke();
-    ctx.font = '800 13px Rubik, sans-serif'; ctx.textAlign = 'center';
-    ctx.fillStyle = color;
-    ctx.fillText(label, px, py - 22);
-    ctx.restore();
+    g.save();
+    g.strokeStyle = color; g.lineWidth = 12;
+    g.beginPath();
+    g.moveTo(px - nx*w, py - ny*w); g.lineTo(px + nx*w, py + ny*w);
+    g.stroke();
+    g.font = '800 13px Rubik, sans-serif'; g.textAlign = 'center';
+    g.fillStyle = color;
+    g.fillText(label, px, py - 22);
+    g.restore();
   }
 
   // Other cars used to ease toward their last known position. That is always
