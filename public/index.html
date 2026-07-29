@@ -1534,6 +1534,10 @@
   // canvas in world coordinates and blit that each frame. Re-stroking ~40
   // alpha-varying segments every frame is what made the driven stages lag.
   let wearCanvas = null, wearBounds = null;
+  // which segments are inside a tunnel — computed once, not per segment per
+  // frame with tunnels.some()
+  const segTunnel = new Uint8Array(NPTS);
+  for (const [a, b] of tunnels) for (let i = a; i <= b && i < NPTS; i++) segTunnel[i] = 1;
   function bakeWear(){
     if (!wear || !wear.lat) return;
     const { lat, n } = wear;
@@ -2608,28 +2612,50 @@
       for (let i = s; i <= e; i++) i === s ? ctx.moveTo(pts[i][0], pts[i][1]) : ctx.lineTo(pts[i][0], pts[i][1]);
       ctx.stroke();
     }
-    // road: segment strokes (outline, surface); bridges get a wooden deck
+    // road: two passes (outline then surface). Group consecutive segments that
+    // share a colour and width into a single stroked polyline, so a stretch of
+    // plain road is one path rather than ~40 — the per-segment stroke was the
+    // single biggest cost in the frame.
     for (let pass = 0; pass < 2; pass++){
-      for (let i = lo; i < hi; i++){
-        const br = onBridge(i);
+      let gi = lo;
+      while (gi < hi){
+        const br = onBridge(gi), tn = segTunnel[gi];
+        const col = pass === 0 ? (br ? '#8a6a44' : tn ? '#3f3a33' : '#b9cfa1')
+                               : (br ? '#eedaae' : tn ? '#8d8577' : '#ffffff');
+        const lw = pass === 0 ? widths[gi] * 2 + 12 : widths[gi] * 2;
+        let gj = gi + 1;
+        while (gj < hi && onBridge(gj) === br && segTunnel[gj] === tn &&
+               (pass === 0 ? widths[gj] * 2 + 12 : widths[gj] * 2) === lw) gj++;
+        ctx.strokeStyle = col; ctx.lineWidth = lw;
         ctx.beginPath();
-        ctx.moveTo(pts[i][0], pts[i][1]);
-        ctx.lineTo(pts[i+1][0], pts[i+1][1]);
-        const tn = tunnels.some(([a, b]) => i >= a && i <= b);
-        if (pass === 0){ ctx.strokeStyle = br ? '#8a6a44' : tn ? '#3f3a33' : '#b9cfa1'; ctx.lineWidth = widths[i] * 2 + 12; }
-        else { ctx.strokeStyle = br ? '#eedaae' : tn ? '#8d8577' : '#ffffff'; ctx.lineWidth = widths[i] * 2; }
+        ctx.moveTo(pts[gi][0], pts[gi][1]);
+        for (let i = gi + 1; i <= gj; i++) ctx.lineTo(pts[i][0], pts[i][1]);
         ctx.stroke();
+        gi = gj;
       }
     }
-    // edge ticks: alternating green/orange
-    for (let i = lo; i < hi; i += 2){
-      const [nx, ny] = normals[i], w = widths[i];
-      ctx.fillStyle = onBridge(i) ? '#7a5c3a' : (i % 4 === 0) ? '#ff8c2e' : '#2fae4e';
-      for (let k = 0; k < 2; k++){
-        if (!tickOK[i][k]) continue; // folded inside the road on a hairpin
-        const s = k === 0 ? -1 : 1;
+    // edge ticks, grouped into three colours so the whole verge is three fills
+    // rather than an arc+fill per tick
+    {
+      const groups = { '#7a5c3a': [], '#ff8c2e': [], '#2fae4e': [] };
+      for (let i = lo; i < hi; i += 2){
+        const [nx, ny] = normals[i], w = widths[i];
+        const col = onBridge(i) ? '#7a5c3a' : (i % 4 === 0) ? '#ff8c2e' : '#2fae4e';
+        for (let k = 0; k < 2; k++){
+          if (!tickOK[i][k]) continue;
+          const s = k === 0 ? -1 : 1;
+          groups[col].push(pts[i][0] + nx * w * s, pts[i][1] + ny * w * s);
+        }
+      }
+      for (const col in groups){
+        const g = groups[col];
+        if (!g.length) continue;
+        ctx.fillStyle = col;
         ctx.beginPath();
-        ctx.arc(pts[i][0] + nx * w * s, pts[i][1] + ny * w * s, 5, 0, Math.PI * 2);
+        for (let p = 0; p < g.length; p += 2){
+          ctx.moveTo(g[p] + 5, g[p+1]);
+          ctx.arc(g[p], g[p+1], 5, 0, Math.PI * 2);
+        }
         ctx.fill();
       }
     }
@@ -3040,6 +3066,7 @@
     let i = list.findIndex(e => e.id === specTarget);
     if (i < 0) i = 0; else i = (i + dir + list.length) % list.length;
     specTarget = list[i].id;
+    for (const f of foods) f.eaten = false;   // fresh stage for the new car
     updateSpecBar();
   }
   function updateSpectate(dt, now){
@@ -3055,16 +3082,33 @@
     // camera stacked two lags on top of the network one, and felt soupy
     me.x = tx; me.y = ty;
     if (t && t.hd != null) me.angle = t.hd;
-    // the road is drawn in a window around idx — without this the stage is
-    // simply not rendered anywhere except near the start line
+    // the road is drawn in a window around idx, so idx must track the watched
+    // car. Search only a window around the current idx rather than all ~600
+    // points every frame — scanning the whole track each frame was itself a
+    // big slice of the spectator lag.
     {
       let best = 1e18, bi = idx;
-      for (let i = 0; i < NPTS; i++){
+      const lo = Math.max(0, idx - 30), hi = Math.min(NPTS, idx + 60);
+      for (let i = lo; i < hi; i++){
         const dx = pts[i][0] - me.x, dy = pts[i][1] - me.y;
         const d = dx * dx + dy * dy;
         if (d < best){ best = d; bi = i; }
       }
       idx = bi;
+    }
+    // eat the food the watched car drives over, so the stage empties as it does
+    // for a driver — spectating has no me.eat(), so do it here from the car's
+    // own size and height
+    if (t){
+      const rr = BASE_R + (t.sz || 0) * 5 + 14;
+      const rr2 = rr * rr;
+      if ((t.z || 0) <= 12){
+        for (const f of foods){
+          if (f.eaten) continue;
+          const dx = f.x - t.x, dy = f.y - t.y;
+          if (dx*dx + dy*dy < rr2){ f.eaten = true; burst(f.x, f.y, f.go ? '#2fae4e' : '#ff8c2e', 8); }
+        }
+      }
     }
     camX += (me.x - camX) * Math.min(dt * 8, 1);
     camY += (me.y - camY) * Math.min(dt * 8, 1);
@@ -3091,6 +3135,7 @@
     updateSpecBar();
   }
   function exitSpectate(){
+    for (const f of foods) f.eaten = false;
     sendWs({ t: 'spectate', on: false });
     spectating = false;
     specTarget = null;
