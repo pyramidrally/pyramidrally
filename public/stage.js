@@ -452,6 +452,33 @@
     }
     // hairpin guards collide exactly like stones
     for (const g of guards) stones.push({ x: g.x, y: g.y, a: g.a, s: g.s, guard: true, tree: g.tree });
+
+    // Start-line barriers (varied stages only): a rail of rocks down both
+    // verges from before the start line back to the service park, so the only
+    // way onto the course is through the banner.
+    if (varied){
+      const BAR_S = 13;
+      for (let i = START_I - 24; i <= START_I + 2; i++){
+        if (i < 2) continue;
+        const [px, py] = pts[i], [nx, ny] = normals[i], w = widths[i];
+        for (const side of [-1, 1]){
+          // hug the edge, then only keep the post if its body clears every lane
+          // — where the start bends, the far rail can otherwise fall on the road
+          let placed = null;
+          for (let m = 0; m < 4; m++){
+            const off = side * (w + BAR_S + 2 + m * 8);
+            const x = px + nx * off, y = py + ny * off;
+            let clear = true;
+            for (let j = 0; j < NPTS; j++){
+              const dx = pts[j][0] - x, dy = pts[j][1] - y;
+              if (dx*dx + dy*dy < (widths[j] + BAR_S + 3) * (widths[j] + BAR_S + 3)){ clear = false; break; }
+            }
+            if (clear){ placed = { x, y }; break; }
+          }
+          if (placed) stones.push({ x: placed.x, y: placed.y, a: 0, s: BAR_S, barrier: true });
+        }
+      }
+    }
   }
 
 

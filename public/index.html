@@ -968,6 +968,35 @@
     }
     // hairpin guards collide exactly like stones
     for (const g of guards) stones.push({ x: g.x, y: g.y, a: g.a, s: g.s, guard: true, tree: g.tree });
+
+    // Start-line barriers (varied stages only). Without these you can roll off
+    // the apron sideways and rejoin the track past the start banner, skipping
+    // the line entirely. A rail of rocks down BOTH verges, from a little before
+    // the start line back toward the service park, closes the grass so the only
+    // way onto the course is through the banner.
+    if (varied){
+      const BAR_S = 13;
+      for (let i = START_I - 24; i <= START_I + 2; i++){
+        if (i < 2) continue;
+        const [px, py] = pts[i], [nx, ny] = normals[i], w = widths[i];
+        for (const side of [-1, 1]){
+          // hug the edge, then only keep the post if its body clears every lane
+          // — where the start bends, the far rail can otherwise fall on the road
+          let placed = null;
+          for (let m = 0; m < 4; m++){
+            const off = side * (w + BAR_S + 2 + m * 8);
+            const x = px + nx * off, y = py + ny * off;
+            let clear = true;
+            for (let j = 0; j < NPTS; j++){
+              const dx = pts[j][0] - x, dy = pts[j][1] - y;
+              if (dx*dx + dy*dy < (widths[j] + BAR_S + 3) * (widths[j] + BAR_S + 3)){ clear = false; break; }
+            }
+            if (clear){ placed = { x, y }; break; }
+          }
+          if (placed) stones.push({ x: placed.x, y: placed.y, a: 0, s: BAR_S, barrier: true });
+        }
+      }
+    }
   }
 
   // water shields: grab one → junk-proof for 3 seconds
@@ -2408,6 +2437,18 @@
     else if (me.z <= 12) for (const st of stones){
       const dxs = st.x - me.x, dys = st.y - me.y;
       if (dxs * dxs + dys * dys < (r + st.s) * (r + st.s)){
+        if (st.barrier){
+          // a solid wall, not a rock: shove the car straight back out and kill
+          // its speed, with no invulnerability window that could be used to
+          // barge through the rest of the rail. You cannot get past it — you
+          // have to go through the start banner.
+          const d = Math.hypot(dxs, dys) || 1;
+          const push = (r + st.s) - d + 1;
+          me.x -= (dxs / d) * push; me.y -= (dys / d) * push;
+          me.vx *= -0.2; me.vy *= -0.2; me.speed *= 0.2; wobbleT = 0.25;
+          burst(st.x, st.y, '#c94f3d', 8);
+          break;
+        }
         me.speed *= 0.2; me.slowT = 0.5; me.invulnT = 1.0; wobbleT = 0.35;
         burst(st.x, st.y, '#8a938a', 12);
         foodToast('🪨 CRASH! Watch out for rocks', true);
@@ -2638,6 +2679,16 @@
     }
     for (const st of stones){
       if (!inView(st.x, st.y, 50)) continue;
+      if (st.barrier){
+        // a low striped post — reads as a course boundary, not scenery
+        g.save(); g.translate(st.x, st.y);
+        g.fillStyle = '#c94f3d';
+        g.fillRect(-st.s * 0.5, -st.s, st.s, st.s * 2);
+        g.fillStyle = '#f3f0e8';
+        g.fillRect(-st.s * 0.5, -st.s * 0.35, st.s, st.s * 0.7);
+        g.restore();
+        continue;
+      }
       if (st.tree){
         g.font = (st.s * 2.6 | 0) + 'px serif';
         g.textAlign = 'center'; g.textBaseline = 'alphabetic';

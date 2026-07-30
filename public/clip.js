@@ -696,11 +696,18 @@
     }
     for (const st of (stage.stones || [])) {
       if (!near(st.x, st.y)) continue;
+      if (st.barrier) {
+        ctx.save(); ctx.translate(st.x, st.y);
+        ctx.fillStyle = '#c94f3d'; ctx.fillRect(-st.s * 0.5, -st.s, st.s, st.s * 2);
+        ctx.fillStyle = '#f3f0e8'; ctx.fillRect(-st.s * 0.5, -st.s * 0.35, st.s, st.s * 0.7);
+        ctx.restore();
+        continue;
+      }
       ctx.save();
       ctx.translate(st.x, st.y);
       ctx.rotate(st.a || 0);
       ctx.font = Math.round((st.s || 16) * 2.2) + 'px sans-serif';
-      ctx.fillText('🪨', 0, 0);
+      ctx.fillText(st.tree ? '🌲' : '🪨', 0, 0);
       ctx.restore();
     }
     const eatenAt = sample.eatenAt;
