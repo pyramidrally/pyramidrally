@@ -453,12 +453,29 @@
     // hairpin guards collide exactly like stones
     for (const g of guards) stones.push({ x: g.x, y: g.y, a: g.a, s: g.s, guard: true, tree: g.tree });
 
-    // Start-line barriers (varied stages only): a rail of rocks down both
-    // verges from before the start line back to the service park, so the only
-    // way onto the course is through the banner.
+    // Start-line barriers (varied stages only): a rail of posts down both verges
+    // from just after the pit-lane join up to the banner, so the only way onto
+    // the course is through the start line — while leaving the pit lane itself
+    // clear so cars can still leave the service park.
     if (varied){
       const BAR_S = 13;
-      for (let i = START_I - 24; i <= START_I + 2; i++){
+      const pit = [];
+      {
+        // apron mouth (parkSlot(-0.9), inlined so this runs without the DOM helper)
+        const pi = 5, dxv = pts[8][0] - pts[2][0], dyv = pts[8][1] - pts[2][1];
+        const pL = Math.hypot(dxv, dyv) || 1;
+        const ax = pts[pi][0] + normals[pi][0] * -(widths[pi] + 62) - (dxv / pL) * (-0.9 * 46);
+        const ay = pts[pi][1] + normals[pi][1] * -(widths[pi] + 62) - (dyv / pL) * (-0.9 * 46);
+        const tx = pts[13][0], ty = pts[13][1];
+        const cx = (ax + tx) / 2 + normals[9][0] * -40;
+        const cy = (ay + ty) / 2 + normals[9][1] * -40;
+        for (let s = 0; s <= 1.0001; s += 0.1){
+          const u = 1 - s;
+          pit.push([u*u*ax + 2*u*s*cx + s*s*tx, u*u*ay + 2*u*s*cy + s*s*ty]);
+        }
+      }
+      const nearPit = (x, y) => pit.some(([qx, qy]) => (qx-x)*(qx-x)+(qy-y)*(qy-y) < 120*120);
+      for (let i = 15; i <= START_I + 1; i++){
         if (i < 2) continue;
         const [px, py] = pts[i], [nx, ny] = normals[i], w = widths[i];
         for (const side of [-1, 1]){
@@ -468,6 +485,7 @@
           for (let m = 0; m < 4; m++){
             const off = side * (w + BAR_S + 2 + m * 8);
             const x = px + nx * off, y = py + ny * off;
+            if (nearPit(x, y)) break;
             let clear = true;
             for (let j = 0; j < NPTS; j++){
               const dx = pts[j][0] - x, dy = pts[j][1] - y;
