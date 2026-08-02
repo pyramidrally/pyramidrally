@@ -850,9 +850,17 @@
   const foods = []; // {x,y,def:[emoji,name,fact],go:bool,eaten}
   {
     const r = mulberry32(SW[4]);
+    // From 2026-08-03 on, spread the food out so there is roughly half as much
+    // of it — the track was reading as cluttered. Doubling the step between
+    // spawns halves the count while keeping the same GO / WHOA / wall mix. This
+    // starts on a fixed future date, NOT the varied flag: stages already raced
+    // (today included) must keep their food so their boards stay comparable.
+    const LEAN_FROM = '2026-08-03';
+    const spread = dateStr >= LEAN_FROM ? 3 : 1;   // ~half the food
     let i = START_I + 14;
     while (i < FINISH_I - 12){
-      i += 5 + Math.floor(r() * 7);
+      i += (5 + Math.floor(r() * 7)) * spread;
+      if (i >= FINISH_I - 12) break;
       if (i >= FINISH_I - 12) break;
       const [px, py] = pts[i], [nx, ny] = normals[i], w = widths[i];
       if (r() < 0.12 && w > 70){

@@ -504,9 +504,14 @@
   const foods = []; // {x,y,def:[emoji,name,fact],go:bool,eaten}
   {
     const r = mulberry32(SW[4]);
+    // from 2026-08-03 the food is halved (doubled spacing); earlier stages,
+    // today included, keep their original density so their boards stay comparable
+    const LEAN_FROM = '2026-08-03';
+    const spread = dateStr >= LEAN_FROM ? 3 : 1;   // ~half the food
     let i = START_I + 14;
     while (i < FINISH_I - 12){
-      i += 5 + Math.floor(r() * 7);
+      i += (5 + Math.floor(r() * 7)) * spread;
+      if (i >= FINISH_I - 12) break;
       if (i >= FINISH_I - 12) break;
       const [px, py] = pts[i], [nx, ny] = normals[i], w = widths[i];
       if (r() < 0.12 && w > 70){
